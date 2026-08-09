@@ -41,13 +41,13 @@
   }
 
   #app{max-width:820px;margin:0 auto 0 96px;min-height:100%;display:flex;flex-direction:column;position:relative}
-  header.top{position:absolute;top:4px;right:16px;z-index:5;text-align:right;pointer-events:none}
+  header.top{position:absolute;top:12px;right:16px;z-index:5;text-align:right;pointer-events:none}
   header.top .now{font-variant-numeric:tabular-nums;line-height:1.1}
   header.top .now .t{display:block;font-size:30px;font-weight:800;letter-spacing:-.01em;
     color:var(--accent);text-shadow:0 2px 0 var(--shadow-ink)}
   header.top .now .d{display:block;font-size:13px;font-weight:700;color:var(--muted)}
   @media (max-width:400px){header.top .now .t{font-size:24px}header.top .now .d{font-size:11px}}
-  main{flex:1;padding:6px 14px 40px}
+  main{flex:1;padding:18px 14px 40px}
   /* The clock is absolutely positioned, so it does not reserve space and nothing
      below it knows it is there. Two consequences had to be handled explicitly:
      (a) the first control row must stop SHORT of the clock rather than merely
@@ -57,10 +57,11 @@
          reserves the height instead. render() sets .nosub. */
   main > .subbar:first-child,main > div:first-child > .subbar:first-child{
     width:calc(100% - 150px);flex-wrap:wrap;overflow-x:visible}
-  main.nosub{padding-top:56px}
+  main.nosub{padding-top:72px}
   @media (max-width:400px){
     main > .subbar:first-child,main > div:first-child > .subbar:first-child{width:calc(100% - 120px)}
-    main.nosub{padding-top:46px}
+    main{padding-top:14px}
+    main.nosub{padding-top:58px}
   }
   .needs{display:inline-block;margin-left:8px;padding:1px 7px;border-radius:999px;
     font-size:11px;font-weight:700;background:var(--panel-2);color:var(--muted);
@@ -453,7 +454,7 @@ const SERIES=['#f5c84c','#5fd08a','#6fb3e8','#b98ae0','#f0a35e','#e8646a','#7fd9
                           invariant #1 (works in airplane mode) holds literally.
    SYNC.enabled=true   -> Connected edition. Structured text only, never blobs. */
 const SYNC={
-  enabled:false,
+  enabled:true,
   url:'https://ifowaucmvfscjxpsxhqb.supabase.co',
   key:'sb_publishable_NFGtTymhI0AeZ4tvcqfSBQ_vg-IVmty',
   schema:'adhq',
@@ -2080,15 +2081,28 @@ function paneLibrary(){
   const meta=(D.libmeta||[]).find(m=>m.kind==='lib');
   const vmeta=(D.libmeta||[]).find(m=>m.kind==='vocab');
   const active=D.library?.length
-    ? `<div class="kv"><span>Active library</span><b>${D.library.length} entries (imported)</b></div>
+    ? `<div class="kv"><span>Active library</span><b>${D.library.length} entries (${meta?.fromServer?'from the server':'imported here'})</b></div>
        <div class="kv"><span>From file</span><b>${esc(meta?.file||'—')}</b></div>
-       <div class="kv"><span>Imported</span><b>${meta?fmtDate(meta.at):'—'}</b></div>
+       ${meta?.version?`<div class="kv"><span>Version</span><b>v${meta.version}</b></div>`:''}
+       <div class="kv"><span>${meta?.fromServer?'Downloaded':'Imported'}</span><b>${meta?fmtDate(meta.at):'—'}</b></div>
        <div class="kv"><span>Review mix</span><b>${['usda','owner','unrev'].map(k=>{
           const n=D.library.filter(e=>e.review===k).length;return n?`${n} ${REV_LABEL[k]}`:''}).filter(Boolean).join(' · ')}</b></div>`
     : `<div class="kv"><span>Active library</span><b>Built-in starter set (${LIBRARY.length} entries)</b></div>`;
   const vocabLine=vmeta
     ? `<p class="suggest">Vocabulary loaded: ${vmeta.tags.length} tags from ${esc(vmeta.file)} — imports are checked against it.</p>`
     : `<p class="suggest">No tag vocabulary loaded yet. Import it first so library rows can be checked against the controlled tag list.</p>`;
+  const connect=SYNC.enabled?`<section class="block card"><h3>From the server</h3>
+      <div class="kv"><span>Status</span><b>${esc(libState.phase==='error'?'Problem: '+libState.msg:(libState.msg||'Not checked yet'))}</b></div>
+      <div class="actions" style="margin-top:10px">
+        <button class="btn" onclick="libSync()">Check for updates</button>
+        ${D.library?.length?`<button class="btn ghost" onclick="libPublish()">Publish this library</button>`:''}</div>
+      <p class="suggest">Devices check once on boot and only download when the server's version number
+      is higher than theirs, so the usual cost is a single small request. Publishing replaces the
+      library for every paired device — it is one transaction, so a dropped connection cannot leave
+      a half-replaced reference behind.</p>
+      <p class="suggest">Publishing requires this account to be listed as a library publisher.
+      Importing a CSV below is still how a new library gets in — the server distributes it, it does
+      not author it.</p></section>`:'';
   return `<section class="block card"><h3>Food storage library</h3>
     ${active}${vocabLine}
     <div class="stack" style="margin-top:12px">
@@ -2100,7 +2114,7 @@ function paneLibrary(){
     <div id="libReport"></div>
     ${D.library?.length?`<div class="addrow"><button class="btn danger" onclick="dropLibrary()">Remove imported library (revert to starter set)</button></div>`:''}
     <p class="suggest" style="margin-top:10px">The library is reference content: it survives "Erase all data" and is replaced whole on each import. Items keep their lib_food_id links, so re-importing an updated file re-connects them automatically.</p>
-  </section>`;
+  </section>${connect}`;
 }
 function libReport(html){const el=$('#libReport');if(el)el.innerHTML=`<div class="report">${html}</div>`}
 window.importVocab=async inp=>{
@@ -2127,7 +2141,10 @@ window.importLib=async inp=>{
   if(!okGo) return;
   await clearStore('library');
   for(const e of entries) await put('library',e);
-  await put('libmeta',{kind:'lib',file:f.name,at:Date.now(),rejected:rejects.length,warned:warns.length});
+  /* a hand-imported file is now the local truth; drop the server version so the
+     next check re-downloads rather than assuming this device is already current */
+  await put('libmeta',{kind:'lib',file:f.name,at:Date.now(),rejected:rejects.length,warned:warns.length,
+    version:0,fromServer:false});
   await refreshLib(); render();
   libReport(`<p class="good">Imported ${entries.length} entries — the app is now using this library.</p>
     ${res.taggedAgainstVocab?'':'<p style="margin-top:6px">Tags were not checked (no vocabulary loaded).</p>'}
@@ -2410,6 +2427,79 @@ async function pullChanges(){
   return rows.length;
 }
 
+/* --- hosted food library (Connect only) ---
+   Reference content, so it rides none of the sync machinery above: no uids, no
+   tombstones, no conflicts. One version integer decides whether to fetch at all. */
+let libState={phase:'idle',msg:''};
+
+async function libServerMeta(){
+  const r=await authFetch('/rest/v1/library_meta?select=version,file,rows,vocab,published_at&limit=1',
+    {headers:PROFILE('GET')});
+  if(!r.ok) throw new Error(`library check failed (${r.status})`);
+  return (await r.json())[0]||null;
+}
+/* PostgREST caps a response at 1000 rows and says nothing when it truncates.
+   The library is 984 today, so one update tips it over and the app would
+   silently serve a partial food-safety reference. Always page. */
+async function libFetchAll(){
+  const PAGE=500, out=[];
+  for(let offset=0;;offset+=PAGE){
+    const r=await authFetch(`/rest/v1/library?select=entry&order=fid.asc&limit=${PAGE}&offset=${offset}`,
+      {headers:PROFILE('GET')});
+    if(!r.ok) throw new Error(`library download failed (${r.status})`);
+    const rows=await r.json();
+    out.push(...rows.map(x=>x.entry));
+    if(rows.length<PAGE) break;          /* a short page is the only end signal */
+    if(out.length>20000) throw new Error('library unexpectedly large — stopping');
+  }
+  return out;
+}
+window.libSync=async(quiet)=>{
+  if(!SYNC.enabled) return;
+  if(!(await session())){ if(!quiet) toast('Pair this device first'); return; }
+  libState={phase:'working',msg:'Checking…'}; if(!quiet) render();
+  try{
+    const srv=await libServerMeta();
+    const local=(D.libmeta||[]).find(m=>m.kind==='lib');
+    if(!srv||!srv.rows){ libState={phase:'ok',msg:'Nothing published yet'}; if(!quiet) render(); return; }
+    if(local&&local.version>=srv.version){
+      libState={phase:'ok',msg:`Up to date (v${srv.version})`}; if(!quiet) render(); return;
+    }
+    libState={phase:'working',msg:`Downloading v${srv.version}…`}; if(!quiet) render();
+    const entries=await libFetchAll();
+    if(entries.length!==srv.rows)
+      throw new Error(`expected ${srv.rows} entries, got ${entries.length} — not replacing`);
+    await clearStore('library');
+    for(const e of entries) await rawPut('library',e);
+    await rawPut('libmeta',{kind:'lib',file:srv.file||'server',at:Date.parse(srv.published_at)||Date.now(),
+      version:srv.version,rejected:0,warned:0,fromServer:true});
+    if(srv.vocab) await rawPut('libmeta',{kind:'vocab',tags:srv.vocab,file:srv.file||'server',at:Date.now()});
+    await refreshLib();
+    libState={phase:'ok',msg:`Updated to v${srv.version} · ${entries.length} entries`};
+    render(); toast(`Food library updated (${entries.length} entries)`);
+  }catch(e){ libState={phase:'error',msg:String(e.message||e)}; render(); }
+};
+window.libPublish=async()=>{
+  if(!D.library?.length) return toast('Import a library here first, then publish it');
+  const vmeta=(D.libmeta||[]).find(m=>m.kind==='vocab');
+  if(!await confirmBox(`Publish these <b>${D.library.length}</b> entries to the server? Every paired device will replace its library with this on next check.`,'Publish','Cancel')) return;
+  libState={phase:'working',msg:'Publishing…'}; render();
+  try{
+    const meta=(D.libmeta||[]).find(m=>m.kind==='lib');
+    const r=await authFetch('/rest/v1/rpc/publish_library',{
+      method:'POST',headers:PROFILE('POST'),
+      body:JSON.stringify({entries:D.library,file:meta?.file||'library.csv',vocab:vmeta?.tags||null})});
+    const body=await r.text();
+    if(!r.ok) throw new Error(/not a library publisher/.test(body)
+      ? 'this account is not a library publisher' : `publish failed (${r.status}) ${body}`);
+    const srv=await libServerMeta();
+    await rawPut('libmeta',{...meta,kind:'lib',version:srv?.version??1});
+    await refreshLib();
+    libState={phase:'ok',msg:`Published v${srv?.version??'?'} · ${body} entries`};
+    render(); toast('Library published');
+  }catch(e){ libState={phase:'error',msg:String(e.message||e)}; render(); }
+};
+
 /* --- settings pane --- */
 function paneSync(){
   if(!SYNC.enabled) return `<section class="block card"><h3>Sync</h3>
@@ -2474,6 +2564,7 @@ const HAS_DIALOG=typeof HTMLDialogElement!=='undefined'&&!!HTMLDialogElement.pro
        should not make 20,000 pointless requests */
     document.addEventListener('visibilitychange',()=>{ if(!document.hidden) syncNow(true); });
     syncNow(true);
+    libSync(true);
   }
   tickClock(); setInterval(tickClock,30000);
   render();
