@@ -406,7 +406,7 @@ const isSentinel = v=>typeof v==='string' && SENTINEL[v];
 /* Storage is two separate things, and mixing them was a modeling mistake:
    WHERE it sits drives shelf life (the library has fridge/freezer/pantry columns),
    WHAT it's in is useful context but doesn't change which column we read.        */
-const LOCATIONS=[
+const DEFAULT_LOCATIONS=[
   {name:'Fridge shelf',key:'fridge'},
   {name:'Crisper drawer',key:'fridge'},
   {name:'Fridge door',key:'fridge'},
@@ -416,9 +416,29 @@ const LOCATIONS=[
   {name:'Cabinet',key:'pantry'},
   {name:'Basement',key:'pantry',cool:true},
 ];
+/* Households organise fridges differently — "Fridge - top shelf", "garage
+   chest freezer", "under the stairs". So locations are editable data, not a
+   constant. What is NOT editable is the requirement that each one declares a
+   ZONE (fridge/freezer/pantry/counter): the zone is what libRange looks up, so
+   a place with no zone would match a library entry and then give no keep-time.
+   LOCATIONS stays as the seed and as the fallback before the store loads. */
+const LOCATIONS=DEFAULT_LOCATIONS;
+const LOCS=()=>D.locations?.length?D.locations:DEFAULT_LOCATIONS;
 const CONTAINERS=['Original packaging','Sealed container','Bag','Wrapped','Uncovered'];
-const locKey=name=>LOCATIONS.find(l=>l.name===name)?.key||null;
-const isCool=name=>!!LOCATIONS.find(l=>l.name===name)?.cool;
+const locKey=name=>LOCS().find(l=>l.name===name)?.key||null;
+const isCool=name=>!!LOCS().find(l=>l.name===name)?.cool;
+/* library best_storage is a zone; resolve it to whatever this household calls
+   that zone, so renaming "Pantry" does not orphan 984 library rows */
+/* NOTE: `key` is the shelf-life zone, and several places share one — Counter,
+   Pantry, Cabinet and Basement are all key:'pantry'. So resolve the library's
+   zone to its canonical place name first and only fall back to "any place in
+   that zone" if the household has renamed or removed it. Picking by key alone
+   would silently file every pantry library row under Counter. */
+const zoneLoc=z=>{
+  const canon=ZONE2LOC[z];
+  if(canon&&LOCS().some(l=>l.name===canon)) return canon;
+  return LOCS().find(l=>l.key===z)?.name||canon||null;
+};
 /* library tags -> the household's own categories (first match wins, user can override) */
 const TAG2CAT=[
   [['meat','poultry','seafood','fish','shellfish','soy-protein','beans-legumes'],'Protein'],
@@ -444,7 +464,7 @@ const DEFAULT_HABITS=['Vitamins','Exercise','Reading','Water','Instrument','Outs
 const DEFAULT_STORES=['Grocery Store','Costco','Online','Swap','Asian Grocery Store','Monger'];
 const STREAK_GOAL=7;  /* days in a row that earn one prize from the queue */
 const RECURRENCES=[['none','One-off'],['daily','Daily'],['weekly','Weekly'],['monthly','Monthly'],['custom','Every N days']];
-const CAP={cats:50,choreTypes:50,habits:50,members:10,stores:50};
+const CAP={cats:50,choreTypes:50,habits:50,members:10,stores:50,locations:24};
 const REV_LABEL={usda:'USDA-reviewed',owner:'Owner-added',unrev:'Unreviewed'};
 const SERIES=['#f5c84c','#5fd08a','#6fb3e8','#b98ae0','#f0a35e','#e8646a','#7fd9cf','#c9d05f','#e089b8','#8fa6f0'];
 
@@ -463,16 +483,16 @@ const SYNC={
      the device in either edition. `members` syncs the name only — the
      avatar blob is stripped on the way out (see scrub()). */
   stores:['items','categories','shopping','common','members','chores',
-          'choreTypes','choreHistory','habits','habitLogs','stores'],
+          'choreTypes','choreHistory','habits','habitLogs','stores','locations'],
 };
 const syncable=s=>SYNC.enabled&&SYNC.stores.includes(s);
 
 /* ---------- IndexedDB ---------- */
-const STORES=['items','categories','shopping','common','members','chores','choreTypes','choreHistory','habits','habitLogs','messages','stores','prizes'];
+const STORES=['items','categories','shopping','common','members','chores','choreTypes','choreHistory','habits','habitLogs','messages','stores','prizes','locations'];
 let db;
 function openDB(){
   return new Promise((res,rej)=>{
-    const rq=indexedDB.open('adhq',6);
+    const rq=indexedDB.open('adhq',7);
     rq.onupgradeneeded=e=>{
       const d=e.target.result;
       for(const s of STORES) if(!d.objectStoreNames.contains(s)) d.createObjectStore(s,{keyPath:'id',autoIncrement:true});
@@ -523,7 +543,7 @@ async function del(s,k){
 }
 
 /* ---------- state ---------- */
-const D={items:[],categories:[],shopping:[],common:[],members:[],chores:[],choreTypes:[],choreHistory:[],habits:[],habitLogs:[]};
+const D={items:[],categories:[],shopping:[],common:[],members:[],chores:[],choreTypes:[],choreHistory:[],habits:[],habitLogs:[],locations:[]};
 let tab='food', foodSub='list', sortMode='soonest', draft=null, foodSearch='';
 let choreFilterType=null, choreFilterWho=null, choreDraft=null;
 let batch=null, foodGapsOnly=false, choreGapsOnly=false;
@@ -539,6 +559,7 @@ async function loadAll(){
   await seed('choreTypes',DEFAULT_CHORE_TYPES);
   await seed('habits',DEFAULT_HABITS);
   await seed('stores',DEFAULT_STORES);
+  if(D.locations.length===0){ for(const l of DEFAULT_LOCATIONS) await put('locations',{...l}); D.locations=await getAll('locations'); }
   await migrateStorage();
   await migrateUids();
   await refreshLib();
@@ -765,7 +786,7 @@ function viewFood(){
     const blank=sortMode==='category'?'Uncategorized':'Location not set';
     const g={}; for(const it of pool)(g[it[field]||blank]??=[]).push(it);
     const order=sortMode==='location'
-      ? [...LOCATIONS.map(l=>l.name),blank].filter(k=>g[k])
+      ? [...LOCS().map(l=>l.name),blank].filter(k=>g[k])
       : Object.keys(g).sort();
     body=order.map(k=>{
       g[k].sort((a,b)=>(daysLeft(a)??9e9)-(daysLeft(b)??9e9));
@@ -818,7 +839,7 @@ window.openItem=id=>{
     ${guideHTML(it,it.location)}
     <section class="block card"><h3>Eat by</h3>
       <input class="field" type="date" value="${it.eatBy||''}" onchange="patchItem(${it.id},'eatBy',this.value)"></section>
-    <section class="block card"><h3>Where it's kept</h3><div class="chiprow">${LOCATIONS.map(l=>
+    <section class="block card"><h3>Where it's kept</h3><div class="chiprow">${LOCS().map(l=>
       `<button class="chip ${it.location===l.name?'on':''}" onclick="patchItem(${it.id},'location',${q(l.name)})">${esc(l.name)}</button>`).join('')}</div></section>
     <section class="block card"><h3>What it's in</h3><div class="chiprow">${CONTAINERS.map(c=>
       `<button class="chip ${it.container===c?'on':''}" onclick="patchItem(${it.id},'container',${q(c)})">${esc(c)}</button>`).join('')}</div></section>
@@ -860,7 +881,7 @@ function viewAdd(){
   return `<section class="block card"><h3>Adding: ${esc(draft.name)}</h3>
     <div class="stack">
       <div><div class="micro" style="margin-bottom:8px">Where is it kept?</div>
-        <div class="chiprow">${LOCATIONS.map(l=>`<button class="chip ${draft.location===l.name?'on':''}" onclick="draftSet('location',${q(l.name)})">${esc(l.name)}</button>`).join('')}</div>${warn}</div>
+        <div class="chiprow">${LOCS().map(l=>`<button class="chip ${draft.location===l.name?'on':''}" onclick="draftSet('location',${q(l.name)})">${esc(l.name)}</button>`).join('')}</div>${warn}</div>
       <div><div class="micro" style="margin-bottom:8px">What's it in? (optional)</div>
         <div class="chiprow">${CONTAINERS.map(c=>`<button class="chip ${draft.container===c?'on':''}" onclick="draftSet('container',${q(c)})">${esc(c)}</button>`).join('')}</div></div>
       <div><div class="micro" style="margin-bottom:8px">Category (optional)</div>
@@ -943,16 +964,27 @@ function batchDate(tok){
   if(!m) return null;
   return isoPlus(+m[1]*(/^w/.test(m[2])?7:1));
 }
-/* "every two weeks", "fortnightly", "weekly", "every 3 days" -> {recurrence,interval} */
+/* ONE recurrence vocabulary, used by both batch add and CSV import. Exporters
+   phrase this differently — "once", "every_n_days", "biweekly", "Every 2 Weeks"
+   — and none of those are wrong, so the parser accepts them rather than making
+   the user rewrite a column. Returns {recurrence,interval} or null. */
 const NUMWORD={one:1,two:2,three:3,four:4,five:5,six:6,seven:7,eight:8,nine:9,ten:10};
-function batchRecur(tok){
-  const s=tok.trim().toLowerCase();
-  if(/^(daily|every ?day)$/.test(s)) return {recurrence:'daily',interval:1};
-  if(/^(weekly|every ?week)$/.test(s)) return {recurrence:'weekly',interval:7};
-  if(/^(monthly|every ?month)$/.test(s)) return {recurrence:'monthly',interval:30};
-  if(/^(fortnightly|biweekly|every ?other ?week)$/.test(s)) return {recurrence:'custom',interval:14};
-  if(/^every ?other ?day$/.test(s)) return {recurrence:'custom',interval:2};
-  const m=s.match(/^every\s+(\d+|[a-z]+)\s*(d|day|days|w|week|weeks|m|month|months)$/);
+function parseRecurrence(tok,intervalHint){
+  const s=String(tok??'').trim().toLowerCase().replace(/[_-]+/g,' ').replace(/\s+/g,' ');
+  const iv=+intervalHint>0?+intervalHint:null;
+  if(!s||/^(none|once|one off|one time|onetime|single|no repeat|never|n\/a)$/.test(s))
+    return {recurrence:'none',interval:iv||7};
+  if(/^(daily|every day|each day|every 1 day[s]?)$/.test(s)) return {recurrence:'daily',interval:1};
+  if(/^(weekly|every week|each week|every 1 week[s]?)$/.test(s)) return {recurrence:'weekly',interval:7};
+  if(/^(monthly|every month|each month|every 1 month[s]?)$/.test(s)) return {recurrence:'monthly',interval:30};
+  if(/^(yearly|annually|annual|every year)$/.test(s)) return {recurrence:'custom',interval:365};
+  if(/^(quarterly|every quarter)$/.test(s)) return {recurrence:'custom',interval:90};
+  if(/^(fortnightly|biweekly|bi weekly|every other week|every 2 weeks)$/.test(s)) return {recurrence:'custom',interval:14};
+  if(/^(every other day|every 2 days)$/.test(s)) return {recurrence:'custom',interval:2};
+  /* "every_n_days" / "custom" / "interval": the cadence lives in another column */
+  if(/^(custom|interval|every n days|every n day)$/.test(s))
+    return iv?{recurrence:'custom',interval:iv}:null;
+  const m=s.match(/^(?:every )?(\d+|[a-z]+) (d|day|days|w|week|weeks|m|month|months)$/);
   if(!m) return null;
   const n=/^\d+$/.test(m[1])?+m[1]:NUMWORD[m[1]];
   if(!n) return null;
@@ -960,13 +992,20 @@ function batchRecur(tok){
   if(/^w/.test(m[2])) return n===1?{recurrence:'weekly',interval:7}:{recurrence:'custom',interval:n*7};
   return n===1?{recurrence:'daily',interval:1}:{recurrence:'custom',interval:n};
 }
+/* batch add: a bare "none" in a comma list is noise, not a cadence */
+function batchRecur(tok){
+  const s=String(tok??'').trim().toLowerCase();
+  if(!s||/^(none|no|n\/a)$/.test(s)) return null;
+  const r=parseRecurrence(s);
+  return r&&r.recurrence==='none'&&!/^(once|one off|one time|onetime|single|never|no repeat)$/.test(s.replace(/[_-]+/g,' '))?null:r;
+}
 function batchLocation(tok){
-  const hit=ciFind(LOCATIONS,tok); if(hit) return hit.name;
+  const hit=ciFind(LOCS(),tok); if(hit) return hit.name;
   const s=tok.toLowerCase();
   if(/^fridge$/.test(s)) return 'Fridge shelf';
   if(/^(crisper|veg drawer)$/.test(s)) return 'Crisper drawer';
   if(/^door$/.test(s)) return 'Fridge door';
-  return LOCATIONS.find(l=>l.name.toLowerCase().includes(s)&&s.length>3)?.name||null;
+  return LOCS().find(l=>l.name.toLowerCase().includes(s)&&s.length>3)?.name||null;
 }
 
 function batchParse(kind,text){
@@ -1754,7 +1793,7 @@ window.deletePrize=async id=>{
 };
 
 /* ===================== SETTINGS ===================== */
-const PANES=[['members','Names'],['prizes','Prizes'],['cats','Categories'],['ctypes','Chore types'],['habits','Habits'],['stores','Stores'],['library','Food library'],['data','Backup'],['sync','Sync'],['storage','Storage']];
+const PANES=[['members','Names'],['prizes','Prizes'],['cats','Categories'],['ctypes','Chore types'],['habits','Habits'],['stores','Stores'],['places','Places'],['library','Food library'],['data','Backup'],['sync','Sync'],['storage','Storage']];
 function viewSettings(){
   const bar=`<div class="subbar">${PANES.map(([k,l])=>
     `<button class="chip ${settingsPane===k?'on':''}" onclick="setPane('${k}')">${l}</button>`).join('')}</div>`;
@@ -1764,6 +1803,7 @@ function viewSettings(){
     : settingsPane==='habits'?paneList('habits','Habits',CAP.habits,'Deleting a habit keeps its past logs for the record.')
     : settingsPane==='prizes'?paneprizes()
     : settingsPane==='stores'?paneList('stores','Shops',CAP.stores,'Shopping items group by shop. Deleting a shop in use asks where its items should move.')
+    : settingsPane==='places'?paneLocations()
     : settingsPane==='library'?paneLibrary()
     : settingsPane==='data'?paneData()
     : settingsPane==='sync'?paneSync()
@@ -1777,9 +1817,81 @@ function usageCount(store,name){
   if(store==='habits') return D.habitLogs.filter(l=>l.habit===name).length;
   if(store==='members') return D.chores.filter(c=>(c.assignees||[]).includes(name)).length+D.habitLogs.filter(l=>l.member===name).length;
   if(store==='stores') return D.shopping.filter(s=>s.store===name).length;
+  if(store==='locations') return D.items.filter(i=>i.location===name).length;
   return 0;
 }
-const UNIT={categories:'item',choreTypes:'chore',habits:'log',members:'record',stores:'item'};
+const UNIT={categories:'item',choreTypes:'chore',habits:'log',members:'record',stores:'item',locations:'item'};
+const ZONES=[['fridge','Fridge cold'],['freezer','Freezer'],['pantry','Cupboard / room temp'],['counter','Counter']];
+const ZONE_NOTE={fridge:'keeps like a fridge',freezer:'keeps like a freezer',
+  pantry:'keeps like a cupboard',counter:'keeps like an open counter'};
+let newLoc={name:'',key:'fridge',cool:false};
+function paneLocations(){
+  const rows=LOCS().map(l=>{
+    const n=usageCount('locations',l.name);
+    const z=ZONES.find(([k])=>k===l.key)?.[1]||l.key;
+    return `<div class="listrow"><span class="nm">${esc(l.name)}</span>
+      <span class="cnt">${esc(z)}${l.cool?' · cool':''} · ${n} item${n===1?'':'s'}</span>
+      ${l.id?`<button class="btn sm" onclick="renameEntry('locations',${l.id})">Rename</button>
+      <button class="btn sm danger" onclick="deleteLocation(${l.id})">Delete</button>`:''}</div>`;
+  }).join('');
+  const missing=ZONES.filter(([k])=>!LOCS().some(l=>l.key===k)).map(([,label])=>label);
+  return `<section class="block card"><h3>Places</h3>
+    <p class="suggest" style="margin:0 0 10px">Every household organises a kitchen differently — add
+    "Fridge - top shelf", "garage freezer", whatever you actually say out loud. Deleting a place in
+    use asks where its food should move; food is never deleted.</p>
+    <div style="margin:0 -16px">${rows}</div>
+    <div class="stack" style="margin-top:12px">
+      <input class="field" id="locName" placeholder="New place… (${LOCS().length}/${CAP.locations})"
+        value="${esc(newLoc.name)}" oninput="newLoc.name=this.value">
+      <div><div class="micro" style="margin-bottom:8px">How does food keep there?</div>
+        <div class="chiprow">${ZONES.map(([k,l])=>
+          `<button class="chip ${newLoc.key===k?'on':''}" onclick="setNewLocKey('${k}')">${l}</button>`).join('')}</div></div>
+      <div class="chiprow"><button class="chip ${newLoc.cool?'on':''}" onclick="toggleNewLocCool()">Unusually cool spot</button></div>
+      <button class="btn primary" onclick="addLocation()">Add place</button>
+    </div>
+    <p class="suggest" style="margin-top:10px">The zone is not cosmetic: it is what the food library
+    looks up to work out how long something keeps. A place without one would match an item and then
+    have nothing to say about it.</p>
+    ${missing.length?`<p class="suggest" style="color:var(--soon)">No place is currently marked
+      <b>${missing.map(esc).join('</b> or <b>')}</b>. Library guidance for that zone will fall back to
+      the built-in name.</p>`:''}
+  </section>`;
+}
+window.setNewLocKey=k=>{newLoc.key=k;render()};
+window.toggleNewLocCool=()=>{newLoc.cool=!newLoc.cool;render()};
+window.addLocation=async()=>{
+  const v=(newLoc.name||'').trim();
+  if(!v) return toast('Give the place a name');
+  if(LOCS().some(l=>l.name.toLowerCase()===v.toLowerCase())) return toast('That place already exists');
+  if(D.locations.length>=CAP.locations) return toast(`That is the limit (${CAP.locations} places)`);
+  await put('locations',{name:v,key:newLoc.key,cool:!!newLoc.cool});
+  await reload('locations'); newLoc={name:'',key:newLoc.key,cool:false};
+  render(); toast(`${v} added`);
+};
+window.deleteLocation=async id=>{
+  const l=D.locations.find(x=>x.id===id); if(!l) return;
+  const n=usageCount('locations',l.name);
+  if(D.locations.length<=1) return toast('Keep at least one place');
+  if(n===0){
+    if(!await confirmBox(`Delete <b>${esc(l.name)}</b>?`,'Delete','Cancel')) return;
+    await del('locations',id); await reload('locations'); render(); toast('Place deleted'); return;
+  }
+  const others=D.locations.filter(x=>x.id!==id);
+  showSheet(`<h2>Move ${esc(l.name)}'s food first</h2>
+    <p class="sub">${n} item${n===1?'':'s'} ${n===1?'is':'are'} kept there. Pick where they should go —
+    nothing is deleted.</p>
+    <div class="chiprow">${others.map(o=>
+      `<button class="chip" onclick="doMoveLocation(${id},${q(o.name)})">${esc(o.name)}</button>`).join('')}
+      <button class="chip" onclick="doMoveLocation(${id},null)">Leave the place blank</button></div>
+    <div class="actions"><button class="btn ghost" onclick="closeSheet()">Cancel</button></div>`);
+};
+window.doMoveLocation=async(id,to)=>{
+  const l=D.locations.find(x=>x.id===id); if(!l) return;
+  for(const it of D.items.filter(i=>i.location===l.name)){ it.location=to; it.modified=Date.now(); await put('items',it); }
+  await del('locations',id);
+  await reload('locations','items'); closeSheet(); render();
+  toast(to?`Moved to ${to}`:'Place deleted, food kept');
+};
 function paneList(store,title,cap,note){
   const rows=D[store].map(x=>{
     const n=usageCount(store,x.name);
@@ -1820,6 +1932,7 @@ window.doRename=async(store,id)=>{
   if(store==='choreTypes') for(const c of D.chores.filter(c=>c.type===old)){c.type=v;await put('chores',c)}
   if(store==='habits') for(const l of D.habitLogs.filter(l=>l.habit===old)){l.habit=v;await put('habitLogs',l)}
   if(store==='stores') for(const s of D.shopping.filter(s=>s.store===old)){s.store=v;await put('shopping',s)}
+  if(store==='locations') for(const it of D.items.filter(i=>i.location===old)){it.location=v;it.modified=Date.now();await put('items',it)}
   if(store==='members'){
     for(const c of D.chores.filter(c=>(c.assignees||[]).includes(old))){c.assignees=c.assignees.map(a=>a===old?v:a);await put('chores',c)}
     for(const l of D.habitLogs.filter(l=>l.member===old)){l.member=v;await put('habitLogs',l)}
@@ -1899,11 +2012,11 @@ function parseLibrary(text,vocab){
       id:r.food_id, fid:r.food_id, name:r.name,
       aliases:r.aliases?r.aliases.split('|').filter(Boolean):[],
       tags:r.tags?r.tags.split('|').filter(Boolean):[],
-      state:r.state||'', best:ZONE2LOC[r.best_storage],
+      state:r.state||'', best:zoneLoc(r.best_storage),
       ok:(r.ok_storage?r.ok_storage.split('|'):[]).filter(z=>{
         if(!z) return false;
         if(!ZONE2LOC[z]){rowWarns.push(`unknown ok_storage zone "${z}" dropped`);return false}
-        return true}).map(z=>ZONE2LOC[z]),
+        return true}).map(z=>zoneLoc(z)),
       cont:r.best_container||'',
       signs:r.spoilage_signs?r.spoilage_signs.split('|').filter(Boolean):[],
       tips:r.tips||'',
@@ -1983,14 +2096,14 @@ const TABLES={
   food_items:{store:'items',cols:['name','category','location','container','lib_food_id','eat_by','created','modified'],
     ex:['Milk','Dairy','Fridge shelf','Original packaging','milk-opened','2026-08-08','',''],
     out:i=>[i.name,i.category,i.location,i.container,i.libId,i.eatBy,new Date(i.created).toISOString(),new Date(i.modified||i.created).toISOString()],
-    inn:(r,errs)=>{
+    inn:(r,errs,warns)=>{
       if(!r.name?.trim()) return errs.push('name is blank'),null;
       if(r.eat_by&&!/^\d{4}-\d{2}-\d{2}$/.test(r.eat_by)) return errs.push('eat_by must be YYYY-MM-DD'),null;
-      if(r.location&&!LOCATIONS.some(l=>l.name.toLowerCase()===r.location.toLowerCase()))
-        return errs.push(`location "${r.location}" is not one of: ${LOCATIONS.map(l=>l.name).join(', ')}`),null;
+      const loc=r.location?LOCS().find(l=>l.name.toLowerCase()===r.location.toLowerCase()):null;
+      if(r.location&&!loc) warns.push(`place "${r.location}" is not set up here — imported with no place`);
       const t=Date.parse(r.created)||Date.now();
       return {name:r.name.trim(),category:r.category||null,
-        location:r.location?LOCATIONS.find(l=>l.name.toLowerCase()===r.location.toLowerCase()).name:null,
+        location:loc?loc.name:null,
         container:r.container||null,libId:r.lib_food_id||null,eatBy:r.eat_by||null,created:t,modified:Date.parse(r.modified)||t};
     }},
   categories:{store:'categories',cols:['name'],ex:['Protein'],
@@ -2005,13 +2118,13 @@ const TABLES={
     ex:['Take out recycling','Garbage','weekly','','','2026-08-10','Alex|Sam','no','no','Blue bin, curb by 7am'],
     out:c=>[c.title,c.type,c.recurrence,c.interval,c.checkIn,c.dueBy,(c.assignees||[]).join('|'),
       c.priority?'yes':'no',c.needsHelp?'yes':'no',c.notes],
-    inn:(r,errs)=>{
+    inn:(r,errs,warns)=>{
       if(!r.title?.trim()) return errs.push('title is blank'),null;
-      const rec=(r.recurrence||'none').toLowerCase();
-      if(!RECURRENCES.some(([k])=>k===rec)) return errs.push(`recurrence "${r.recurrence}" is not one of: none, daily, weekly, monthly, custom`),null;
-      if(rec==='custom'&&!(+r.interval_days>0)) return errs.push('custom recurrence needs interval_days'),null;
+      const R=parseRecurrence(r.recurrence,r.interval_days);
+      if(!R) return errs.push(`recurrence "${r.recurrence}" was not understood. Accepted: none/once, daily, weekly, monthly, `
+        +`yearly, quarterly, fortnightly, "every 3 days", "every 2 weeks", or custom/every_n_days with interval_days set`),null;
       for(const f of ['check_in','due_by']) if(r[f]&&!/^\d{4}-\d{2}-\d{2}$/.test(r[f])) return errs.push(`${f} must be YYYY-MM-DD`),null;
-      return {title:r.title.trim(),type:r.type||null,recurrence:rec,interval:+r.interval_days||7,
+      return {title:r.title.trim(),type:r.type||null,recurrence:R.recurrence,interval:R.interval,
         checkIn:r.check_in||'',dueBy:r.due_by||'',assignees:(r.assignees||'').split('|').filter(Boolean),
         priority:/^(yes|true|1)$/i.test(r.priority||''),needsHelp:/^(yes|true|1)$/i.test(r.needs_help||''),
         notes:r.notes||'',created:Date.now(),modified:Date.now()};
@@ -2196,22 +2309,25 @@ window.doImport=async()=>{
   const missing=t.cols.filter(c=>!head.includes(c));
   if(missing.length) return showReport(`<p class="bad">Wrong file for <b>${key.replace(/_/g,' ')}</b> — missing column${missing.length>1?'s':''}: ${missing.join(', ')}.</p>
     <p style="margin-top:8px">Download the template above to see the expected header row.</p>`);
-  const ok=[],bad=[];
+  const ok=[],bad=[],soft=[];   /* soft = imported, but something was adjusted */
   for(let i=1;i<rows.length;i++){
     const obj={}; head.forEach((h,j)=>obj[h]=(rows[i][j]??'').trim());
-    const errs=[]; const rec=t.inn(obj,errs);
-    if(rec) ok.push(rec); else bad.push(`Row ${i+1}: ${errs.join('; ')}`);
+    const errs=[],rw=[]; const rec=t.inn(obj,errs,rw);
+    if(rec){ ok.push(rec); if(rw.length) soft.push(`Row ${i+1}: ${rw.join('; ')}`); }
+    else bad.push(`Row ${i+1}: ${errs.join('; ')}`);
   }
   if(ok.length===0) return showReport(`<p class="bad">Nothing imported — all ${bad.length} rows had problems.</p><ul>${bad.slice(0,20).map(b=>`<li>${esc(b)}</li>`).join('')}</ul>`);
   const verb=importMode==='replace'?`Replace all ${D[t.store].length} existing rows with`:'Add';
-  if(!await confirmBox(`${verb} ${ok.length} valid row${ok.length===1?'':'s'}?${bad.length?` ${bad.length} row${bad.length===1?'':'s'} will be skipped.`:''}`,'Import','Cancel')) return;
+  if(!await confirmBox(`${verb} ${ok.length} valid row${ok.length===1?'':'s'}?${bad.length?` ${bad.length} row${bad.length===1?'':'s'} will be skipped.`:''}${soft.length?` ${soft.length} will import with a blank to fill in.`:''}`,'Import','Cancel')) return;
   if(importMode==='replace') await clearStore(t.store);
   for(const rec of ok) await put(t.store,rec);
   await reload(t.store);
   render();   /* refresh counts first — render() rebuilds the pane, so report goes after */
   showReport(`<p class="good">Imported ${ok.length} row${ok.length===1?'':'s'}.</p>${
     bad.length?`<p class="bad" style="margin-top:8px">Skipped ${bad.length}:</p><ul>${bad.slice(0,20).map(b=>`<li>${esc(b)}</li>`).join('')}</ul>`
-    +(bad.length>20?`<p style="margin-top:6px">…and ${bad.length-20} more.</p>`:''):''}`);
+    +(bad.length>20?`<p style="margin-top:6px">…and ${bad.length-20} more.</p>`:''):''}${
+    soft.length?`<p style="margin-top:8px;color:var(--soon)">Imported with a blank left to fill — ${soft.length}:</p><ul>${soft.slice(0,20).map(b=>`<li>${esc(b)}</li>`).join('')}</ul>`
+    +(soft.length>20?`<p style="margin-top:6px">…and ${soft.length-20} more.</p>`:''):''}`);
   $('#impFile').value='';
 };
 function showReport(html){ const el=$('#impReport'); if(el) el.innerHTML=`<div class="report">${html}</div>` }
