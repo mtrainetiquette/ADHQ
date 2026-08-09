@@ -2484,36 +2484,64 @@ window.syncNow=async(quiet)=>{
   if(syncState.phase==='working') return;
   syncState={phase:'working',at:Date.now(),msg:'Syncing…'}; if(!quiet) render();
   try{
-    await pushChanges();
+    let partial=null;
+    try{ await pushChanges(); }
+    catch(e){ if(e.partial) partial=e; else throw e; }   /* one bad store must not stop the rest */
     let n=0,page;                      /* page until the server runs out */
     do{ page=await pullChanges(); n+=page; } while(page>=1000);
-    syncState={phase:'ok',at:Date.now(),msg:n?`${n} change${n===1?'':'s'} in`:'Up to date'};
-    if(n) render(); else if(!quiet) render();
+    syncState=partial
+      ? {phase:'error',at:Date.now(),msg:partial.message}
+      : {phase:'ok',at:Date.now(),msg:n?`${n} change${n===1?'':'s'} in`:'Up to date'};
+    if(n||partial) render(); else if(!quiet) render();
   }catch(e){
     syncState={phase:'error',at:Date.now(),msg:String(e.message||e)};
     if(!quiet) render();
   }
 };
 
+/* Push per store, not as one bulk insert.
+
+   The first version sent every dirty row in a single POST. One row the server
+   would not accept — a store name added by a newer app build than the database
+   knows about — failed the whole statement, so a single new feature stopped ALL
+   sync, including stores that were perfectly valid. An additive app change
+   became a total outage. Batching by store isolates that: the unknown store
+   fails alone, its rows stay dirty and retry later, and everything else lands. */
 async function pushChanges(){
-  const rows=[];
+  const groups={};
   for(const s of SYNC.stores)
     for(const r of (D[s]||[]).filter(x=>x._dirty))
-      rows.push({store:s,uid:r.uid,data:scrub(s,r),modified:new Date(r.modified||Date.now()).toISOString(),deleted:false});
+      (groups[s]??={rows:[],recs:[],tombs:[]}).rows.push(
+        {store:s,uid:r.uid,data:scrub(s,r),modified:new Date(r.modified||Date.now()).toISOString(),deleted:false}),
+      groups[s].recs.push(r);
   const tombs=(await getAll('sync')).filter(x=>x.k?.startsWith('tomb:')&&x._dirty);
-  for(const t of tombs)
-    rows.push({store:t.store,uid:t.uid,data:{},modified:new Date(t.at).toISOString(),deleted:true});
-  if(!rows.length) return 0;
-  const r=await authFetch(`/rest/v1/records?on_conflict=owner,store,uid`,{
-    method:'POST',
-    headers:{...PROFILE('POST'),Prefer:'resolution=merge-duplicates,return=minimal'},
-    body:JSON.stringify(rows)});
-  if(!r.ok) throw new Error(`push failed (${r.status}) ${await r.text()}`);
-  /* only clear the dirty flags the server actually accepted */
-  for(const s of SYNC.stores)
-    for(const rec of (D[s]||[]).filter(x=>x._dirty)){ delete rec._dirty; await rawPut(s,rec); }
-  for(const t of tombs){ delete t._dirty; await rawPut('sync',t); }
-  return rows.length;
+  for(const t of tombs){
+    const g=(groups[t.store]??={rows:[],recs:[],tombs:[]});
+    g.rows.push({store:t.store,uid:t.uid,data:{},modified:new Date(t.at).toISOString(),deleted:true});
+    g.tombs.push(t);
+  }
+
+  let sent=0; const failed=[];
+  for(const [store,g] of Object.entries(groups)){
+    if(!g.rows.length) continue;
+    const r=await authFetch('/rest/v1/records?on_conflict=owner,store,uid',{
+      method:'POST',
+      headers:{...PROFILE('POST'),Prefer:'resolution=merge-duplicates,return=minimal'},
+      body:JSON.stringify(g.rows)});
+    if(!r.ok){
+      const body=await r.text();
+      failed.push({store,msg:/records_store_allowed/.test(body)
+        ? `the server does not yet allow the "${store}" store — run the latest migration`
+        : `${r.status} ${body.slice(0,120)}`});
+      continue;                       /* leave these dirty; they retry next pass */
+    }
+    for(const rec of g.recs){ delete rec._dirty; await rawPut(store,rec); }
+    for(const t of g.tombs){ delete t._dirty; await rawPut('sync',t); }
+    sent+=g.rows.length;
+  }
+  if(failed.length) throw Object.assign(
+    new Error(failed.map(f=>f.msg).join(' · ')),{partial:true,sent,failed});
+  return sent;
 }
 
 async function pullChanges(){
