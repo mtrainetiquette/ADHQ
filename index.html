@@ -48,8 +48,30 @@
   header.top .now .d{display:block;font-size:13px;font-weight:700;color:var(--muted)}
   @media (max-width:400px){header.top .now .t{font-size:24px}header.top .now .d{font-size:11px}}
   main{flex:1;padding:6px 14px 40px}
-  /* keep the first control row from sliding under the clock */
-  main > .subbar:first-child,main > div:first-child > .subbar:first-child{padding-right:150px}
+  /* The clock is absolutely positioned, so it does not reserve space and nothing
+     below it knows it is there. Two consequences had to be handled explicitly:
+     (a) the first control row must stop SHORT of the clock rather than merely
+         padding itself — with overflow-x:auto, padding lets chips scroll
+         underneath it, which is what happened once Settings grew to ten panes;
+     (b) a view with no control row at all (Shop) has nothing to offset, so main
+         reserves the height instead. render() sets .nosub. */
+  main > .subbar:first-child,main > div:first-child > .subbar:first-child{
+    width:calc(100% - 150px);flex-wrap:wrap;overflow-x:visible}
+  main.nosub{padding-top:56px}
+  @media (max-width:400px){
+    main > .subbar:first-child,main > div:first-child > .subbar:first-child{width:calc(100% - 120px)}
+    main.nosub{padding-top:46px}
+  }
+  .needs{display:inline-block;margin-left:8px;padding:1px 7px;border-radius:999px;
+    font-size:11px;font-weight:700;background:var(--panel-2);color:var(--muted);
+    border:1px solid var(--line);vertical-align:middle}
+  .btable{display:flex;flex-direction:column;gap:8px}
+  .brow{padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:var(--panel-2)}
+  .brow>b{display:block;margin-bottom:5px}
+  .bchips{display:flex;flex-wrap:wrap;gap:5px}
+  .chip.sm{min-height:0;padding:2px 9px;font-size:12px;font-weight:600}
+  .chip.sm.new{border-style:dashed}
+  .chip.sm.gap{opacity:.75;font-style:italic}
 
   nav.tabs{position:fixed;left:0;top:0;bottom:0;z-index:20;width:88px;
     background:var(--panel);border-right:1px solid var(--line);
@@ -503,6 +525,7 @@ async function del(s,k){
 const D={items:[],categories:[],shopping:[],common:[],members:[],chores:[],choreTypes:[],choreHistory:[],habits:[],habitLogs:[]};
 let tab='food', foodSub='list', sortMode='soonest', draft=null, foodSearch='';
 let choreFilterType=null, choreFilterWho=null, choreDraft=null;
+let batch=null, foodGapsOnly=false, choreGapsOnly=false;
 let habitMember=null, habitGraphMode='habit', habitDate=null;
 let settingsPane='members';
 
@@ -674,21 +697,32 @@ function render(){
   const m=$('#main');
   $('#nNotes').textContent=D.messages.length;
   $('#nNotes').classList.toggle('zero',D.messages.length===0);
+  m.classList.remove('nosub');
   m.innerHTML = tab==='food'?viewFood()
     : tab==='chores'?viewChores()
     : tab==='habits'?viewHabits()
     : tab==='shop'?viewShop()
     : tab==='notes'?viewNotes()
     : viewSettings();
+  /* reserve the clock's height only when this view has no control row to sit beside */
+  const f=m.firstElementChild;
+  const hasSub=!!f&&(f.classList.contains('subbar')
+    ||(!!f.firstElementChild&&f.firstElementChild.classList.contains('subbar')));
+  if(!hasSub) m.classList.add('nosub');
   if(tab==='notes') hydrateMedia();
 }
 
 /* ===================== FOOD ===================== */
+/* Derived, never stored — same reasoning as prize milestones (TRANSFER.md §4).
+   Filling a blank in makes the tag disappear on its own. */
+const itemGaps=it=>[!it.category&&'category',!it.location&&'place',!it.eatBy&&'eat-by'].filter(Boolean);
+const choreGaps=c=>[!c.type&&'type',!c.dueBy&&'due date',!(c.assignees||[]).length&&'who'].filter(Boolean);
+const gapTag=g=>g.length?`<span class="needs">needs details</span>`:'';
 function itemCard(it){
   const meta=[it.category,it.location,it.container,it.eatBy?'eat by '+fmtDate(it.eatBy+'T12:00:00'):null].filter(Boolean).join(' · ');
   return `<button class="itemcard card" onclick="openItem(${it.id})">
     ${dayChip(daysLeft(it))}
-    <span class="iteminfo"><span class="nm">${esc(it.name)}</span><span class="meta">${esc(meta)}</span></span>
+    <span class="iteminfo"><span class="nm">${esc(it.name)}${gapTag(itemGaps(it))}</span><span class="meta">${esc(meta)}</span></span>
   </button>`;
 }
 function itemMatches(it,query){
@@ -704,19 +738,24 @@ window.setSearch=v=>{foodSearch=v;render();
   const el=$('#foodSearch');
   if(el){el.focus();const n=el.value.length;el.setSelectionRange(n,n)}};
 function viewFood(){
+  if(batch&&batch.kind==='food') return viewBatch();
   const sub=`<div class="subbar">
     <button class="chip ${foodSub==='list'?'on':''}" onclick="setSub('list')">What's stored</button>
     <button class="chip ${foodSub==='add'?'on':''}" onclick="setSub('add')">+ Add food</button>
+    <button class="chip" onclick="openBatch('food')">≡ Batch add</button>
   </div>`;
   if(foodSub==='add') return sub+viewAdd();
   if(D.items.length===0) return sub+`<div class="empty card"><p><strong>Nothing logged yet.</strong></p>
-    <p>Tap <b>+ Add food</b> to log the first thing — fridge, freezer, pantry, counter, cabinet, or basement.</p></div>`;
+    <p>Tap <b>+ Add food</b> to log the first thing — fridge, freezer, pantry, counter, cabinet, or basement.
+    Or <b>≡ Batch add</b> to type several at once.</p></div>`;
   const search=`<div style="padding:0 4px 10px"><input class="field" id="foodSearch" placeholder="Search — try a name, place, or tag like spices…"
     value="${esc(foodSearch)}" oninput="setSearch(this.value)"></div>`;
   const modes=[['soonest','Eat soonest'],['category','By category'],['location','By location'],['newest','Newest']];
+  const nGap=D.items.filter(it=>itemGaps(it).length).length;
   const bar=`<div class="subbar">${modes.map(([k,l])=>
-    `<button class="chip ${sortMode===k?'on':''}" onclick="setSort('${k}')">${l}</button>`).join('')}</div>`;
-  const pool=D.items.filter(it=>itemMatches(it,foodSearch));
+    `<button class="chip ${sortMode===k?'on':''}" onclick="setSort('${k}')">${l}</button>`).join('')}
+    ${nGap?`<button class="chip ${foodGapsOnly?'on':''}" onclick="toggleFoodGaps()">Needs details · ${nGap}</button>`:''}</div>`;
+  const pool=D.items.filter(it=>itemMatches(it,foodSearch)&&(!foodGapsOnly||itemGaps(it).length));
   if(pool.length===0) return sub+search+`<div class="empty card"><p><strong>No matches for "${esc(foodSearch)}".</strong></p>
     <p>Search covers names, places, and the library's tags and aliases.</p></div>`;
   let body='';
@@ -737,7 +776,8 @@ function viewFood(){
   }
   return sub+search+bar+body;
 }
-window.setSub=s=>{foodSub=s;draft=null;foodSearch='';render()};
+window.setSub=s=>{foodSub=s;draft=null;batch=null;foodSearch='';render()};
+window.toggleFoodGaps=()=>{foodGapsOnly=!foodGapsOnly;render()};
 window.setSort=m=>{sortMode=m;render()};
 
 function guideHTML(item,location){
@@ -882,24 +922,218 @@ function choreCard(c){
       ${flags?`<span class="flags">${flags}</span>`:''}</span>
   </button>`;
 }
+/* ===================== BATCH ADD =====================
+   Walking round the house saying "sheets need washing every two weeks, that's
+   linen maintenance". One line per thing. Only the name is required.
+
+   Tokens after the name are CLASSIFIED, not positional — you can say them in any
+   order, and anything the app doesn't recognise is surfaced rather than dropped.
+   An unrecognised word is usually a category or chore type that doesn't exist
+   yet, so it's offered as one to create.
+   ==================================================== */
+const batchTokens=line=>line.split(/[,;]|\s+[–—-]\s+/).map(t=>t.trim()).filter(Boolean);
+const ciFind=(list,tok)=>list.find(x=>(x.name||x).toLowerCase()===tok.toLowerCase());
+
+/* "+5", "in 3 days", "2 weeks", "2026-08-20" -> YYYY-MM-DD, else null */
+function batchDate(tok){
+  const s=tok.trim().toLowerCase();
+  if(/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const m=s.match(/^(?:\+|in\s+)?(\d+)\s*(d|day|days|w|week|weeks)$/);
+  if(!m) return null;
+  return isoPlus(+m[1]*(/^w/.test(m[2])?7:1));
+}
+/* "every two weeks", "fortnightly", "weekly", "every 3 days" -> {recurrence,interval} */
+const NUMWORD={one:1,two:2,three:3,four:4,five:5,six:6,seven:7,eight:8,nine:9,ten:10};
+function batchRecur(tok){
+  const s=tok.trim().toLowerCase();
+  if(/^(daily|every ?day)$/.test(s)) return {recurrence:'daily',interval:1};
+  if(/^(weekly|every ?week)$/.test(s)) return {recurrence:'weekly',interval:7};
+  if(/^(monthly|every ?month)$/.test(s)) return {recurrence:'monthly',interval:30};
+  if(/^(fortnightly|biweekly|every ?other ?week)$/.test(s)) return {recurrence:'custom',interval:14};
+  if(/^every ?other ?day$/.test(s)) return {recurrence:'custom',interval:2};
+  const m=s.match(/^every\s+(\d+|[a-z]+)\s*(d|day|days|w|week|weeks|m|month|months)$/);
+  if(!m) return null;
+  const n=/^\d+$/.test(m[1])?+m[1]:NUMWORD[m[1]];
+  if(!n) return null;
+  if(/^m/.test(m[2])) return n===1?{recurrence:'monthly',interval:30}:{recurrence:'custom',interval:n*30};
+  if(/^w/.test(m[2])) return n===1?{recurrence:'weekly',interval:7}:{recurrence:'custom',interval:n*7};
+  return n===1?{recurrence:'daily',interval:1}:{recurrence:'custom',interval:n};
+}
+function batchLocation(tok){
+  const hit=ciFind(LOCATIONS,tok); if(hit) return hit.name;
+  const s=tok.toLowerCase();
+  if(/^fridge$/.test(s)) return 'Fridge shelf';
+  if(/^(crisper|veg drawer)$/.test(s)) return 'Crisper drawer';
+  if(/^door$/.test(s)) return 'Fridge door';
+  return LOCATIONS.find(l=>l.name.toLowerCase().includes(s)&&s.length>3)?.name||null;
+}
+
+function batchParse(kind,text){
+  return text.split('\n').map(l=>l.trim()).filter(Boolean).map(line=>{
+    const toks=batchTokens(line);
+    const name=toks.shift();
+    const r={line,name,unknown:[]};
+    for(const t of toks){
+      if(kind==='food'){
+        const loc=batchLocation(t);       if(loc&&!r.location){r.location=loc;continue}
+        const cat=ciFind(D.categories,t); if(cat&&!r.category){r.category=cat.name;continue}
+        const con=ciFind(CONTAINERS,t);   if(con&&!r.container){r.container=con;continue}
+        const d=batchDate(t);             if(d&&!r.eatBy){r.eatBy=d;continue}
+      }else{
+        const rec=batchRecur(t);          if(rec&&!r.recurrence){Object.assign(r,rec);continue}
+        const who=ciFind(D.members,t);    if(who){(r.assignees??=[]).push(who.name);continue}
+        const ty=ciFind(D.choreTypes,t);  if(ty&&!r.type){r.type=ty.name;continue}
+        const d=batchDate(t);             if(d&&!r.dueBy){r.dueBy=d;continue}
+        if(/^(priority|urgent)$/i.test(t)){r.priority=true;continue}
+      }
+      r.unknown.push(t);
+    }
+    /* the first unrecognised word is almost always a category / chore type that
+       doesn't exist yet — propose it rather than discarding it */
+    if(r.unknown.length) r.propose=r.unknown[0];
+    /* food has nowhere to keep loose words; chores have a notes field, so use it */
+    if(kind==='chores'&&r.unknown.length>1) r.notes=r.unknown.slice(1).join(', ');
+    return r;
+  });
+}
+const batchGaps=(kind,r)=>kind==='food'
+  ? ['category','location','eat-by'].filter((_,i)=>![r.category,r.location,r.eatBy][i])
+  : ['type','repeat','due date','who'].filter((_,i)=>![r.type,r.recurrence,r.dueBy,r.assignees?.length][i]);
+
+window.openBatch=k=>{batch={kind:k,text:'',parsed:null,makeVocab:true};draft=null;choreDraft=null;
+  if(k==='food') foodSub='batch'; render()};
+window.closeBatch=()=>{batch=null;foodSub='list';render()};
+window.batchText=v=>{batch.text=v};
+window.batchPreview=()=>{
+  if(!batch.text.trim()) return toast('Type at least one line');
+  batch.parsed=batchParse(batch.kind,batch.text); render();
+};
+window.batchBack=()=>{batch.parsed=null;render()};
+window.batchToggleVocab=()=>{batch.makeVocab=!batch.makeVocab;render()};
+
+function batchNewVocab(){
+  if(!batch.parsed) return [];
+  const known=batch.kind==='food'?D.categories:D.choreTypes;
+  const seen=new Set(known.map(x=>x.name.toLowerCase()));
+  const out=[];
+  for(const r of batch.parsed){
+    if(!r.propose) continue;
+    const k=r.propose.toLowerCase();
+    if(seen.has(k)) continue;
+    seen.add(k); out.push(r.propose);
+  }
+  return out;
+}
+window.batchCommit=async()=>{
+  const kind=batch.kind, rows=batch.parsed, fresh=batchNewVocab();
+  const store=kind==='food'?'categories':'choreTypes';
+  const cap=kind==='food'?CAP.cats:CAP.choreTypes;
+  let made=0;
+  if(batch.makeVocab){
+    for(const name of fresh){
+      if(D[store].length+made>=cap) break;      /* caps are caps */
+      await put(store,{name}); made++;
+    }
+    await reload(store);
+  }
+  const live=new Set(D[store].map(x=>x.name.toLowerCase()));
+  const now=Date.now();
+  for(const r of rows){
+    const proposed=r.propose&&live.has(r.propose.toLowerCase())?
+      D[store].find(x=>x.name.toLowerCase()===r.propose.toLowerCase()).name:null;
+    if(kind==='food'){
+      await put('items',{name:r.name,location:r.location||null,container:r.container||null,
+        category:r.category||proposed||null,libId:null,eatBy:r.eatBy||null,created:now,modified:now});
+    }else{
+      await put('chores',{title:r.name,type:r.type||proposed||null,
+        recurrence:r.recurrence||'none',interval:r.interval||7,checkIn:'',dueBy:r.dueBy||'',
+        assignees:r.assignees||[],priority:!!r.priority,needsHelp:false,
+        notes:r.notes||'',created:now,modified:now});
+    }
+  }
+  await reload(kind==='food'?'items':'chores');
+  const gapped=rows.filter(r=>batchGaps(kind,{...r,...(r.propose&&batch.makeVocab?{[kind==='food'?'category':'type']:r.propose}:{})}).length).length;
+  batch=null; foodSub='list';
+  toast(`Added ${rows.length}${made?` · ${made} new ${kind==='food'?'categories':'types'}`:''}${gapped?` · ${gapped} need details`:''}`);
+  render();
+};
+
+function viewBatch(){
+  const kind=batch.kind, food=kind==='food';
+  const back=`<div class="subbar">
+    <button class="chip" onclick="closeBatch()">← Back</button>
+    <button class="chip on">Batch add ${food?'food':'chores'}</button></div>`;
+  if(!batch.parsed){
+    const eg=food
+      ? `Milk, fridge door, Dairy, 5 days\nSourdough, counter\nFrozen peas, freezer, Produce`
+      : `Wash sheets, every two weeks, linen maintenance\nBins out, weekly, Alex\nDescale kettle`;
+    return back+`<section class="block card"><h3>One per line</h3>
+      <p class="suggest">Start with the name. After that add anything you know —
+      ${food?'a place, a category, how long it keeps':'how often, who does it, when it is due'} —
+      separated by commas, in any order. Everything except the name is optional.</p>
+      <textarea class="field" rows="9" style="min-height:180px;font-family:inherit"
+        placeholder="${esc(eg)}" oninput="batchText(this.value)">${esc(batch.text)}</textarea>
+      <div class="actions" style="margin-top:10px">
+        <button class="btn" onclick="batchPreview()">Check the list</button>
+        <button class="btn ghost" onclick="closeBatch()">Cancel</button></div></section>
+      <section class="block card"><h3>What it understands</h3>
+      <p class="suggest">${food
+        ? 'Places (fridge, freezer, pantry, counter, cabinet, basement, crisper, door) · your categories · containers · "5 days", "2 weeks", or a date like 2026-08-20.'
+        : '"every two weeks", "weekly", "fortnightly", "every 3 days" · household names · your chore types · "3 days" or 2026-08-20 for a due date · the word "priority".'}</p>
+      <p class="suggest">Anything else is treated as a ${food?'category':'chore type'} you have not made yet,
+      and you will be asked before it is created. Nothing is written until you confirm.</p></section>`;
+  }
+  const fresh=batchNewVocab();
+  const rows=batch.parsed.map(r=>{
+    const bits=food
+      ? [r.category,r.location,r.container,r.eatBy?'eat by '+r.eatBy:null]
+      : [r.type,r.recurrence?recurLabel({recurrence:r.recurrence,interval:r.interval}):null,
+         r.dueBy?'due '+r.dueBy:null,(r.assignees||[]).join(' & ')||null,r.priority?'priority':null];
+    const known=bits.filter(Boolean).map(b=>`<span class="chip sm">${esc(b)}</span>`).join('');
+    const prop=r.propose?`<span class="chip sm new">${esc(r.propose)} — new ${food?'category':'type'}</span>`:'';
+    const gaps=batchGaps(kind,{...r,...(r.propose&&batch.makeVocab?{[food?'category':'type']:r.propose}:{})});
+    const miss=gaps.length?`<span class="chip sm gap">no ${gaps.join(', no ')}</span>`:'';
+    const note=r.notes?`<span class="chip sm">note: ${esc(r.notes)}</span>`:'';
+    return `<div class="brow"><b>${esc(r.name)}</b><div class="bchips">${known}${prop}${note}${miss}</div></div>`;
+  }).join('');
+  const vocab=fresh.length?`<section class="block card"><h3>${fresh.length} new ${food?'category':'chore type'}${fresh.length===1?'':'s'}</h3>
+      <p class="suggest">These are not in your list yet: <b>${fresh.map(esc).join(', ')}</b>.</p>
+      <div class="chiprow">
+        <button class="chip ${batch.makeVocab?'on':''}" onclick="batchToggleVocab()">Create ${fresh.length===1?'it':'them'} and assign</button>
+        <button class="chip ${batch.makeVocab?'':'on'}" onclick="batchToggleVocab()">Leave blank and flag</button></div></section>`:'';
+  const gapCount=batch.parsed.filter(r=>batchGaps(kind,{...r,...(r.propose&&batch.makeVocab?{[food?'category':'type']:r.propose}:{})}).length).length;
+  return back+vocab+`<section class="block card"><h3>${batch.parsed.length} to add</h3>
+      ${gapCount?`<p class="suggest">${gapCount} still ${gapCount===1?'has':'have'} blanks. That is fine —
+        they are added anyway and show a <b>needs details</b> tag you can filter for later.</p>`:''}
+      <div class="btable">${rows}</div>
+      <div class="actions" style="margin-top:12px">
+        <button class="btn" onclick="batchCommit()">Add ${batch.parsed.length}</button>
+        <button class="btn ghost" onclick="batchBack()">Edit the list</button></div></section>`;
+}
+
 const recurLabel=c=>c.recurrence==='custom'?`every ${c.interval} days`:({daily:'daily',weekly:'weekly',monthly:'monthly'}[c.recurrence]||'');
 function viewChores(){
+  if(batch&&batch.kind==='chores') return viewBatch();
   if(choreDraft) return viewChoreForm();
   const sub=`<div class="subbar">
     <button class="chip on">What's next</button>
     <button class="chip" onclick="newChore()">+ Add chore</button>
+    <button class="chip" onclick="openBatch('chores')">≡ Batch add</button>
     <button class="chip" onclick="showHistory()">History</button>
   </div>`;
   if(D.chores.length===0) return sub+`<div class="empty card"><p><strong>No chores yet.</strong></p>
     <p>Tap <b>+ Add chore</b> to set one up.</p></div>`;
   const types=[...new Set(D.chores.map(c=>c.type).filter(Boolean))];
   const whos=[...new Set(D.chores.flatMap(c=>c.assignees||[]))];
+  const nGap=D.chores.filter(c=>choreGaps(c).length).length;
   const filters=`<div class="subbar">
+    ${nGap?`<button class="chip ${choreGapsOnly?'on':''}" onclick="toggleChoreGaps()">Needs details · ${nGap}</button>`:''}
     ${types.map(t=>`<button class="chip ${choreFilterType===t?'on':''}" onclick="filterType(${q(t)})">${esc(t)}</button>`).join('')}
     ${whos.map(w=>`<button class="chip ${choreFilterWho===w?'on':''} ${memberByName(w)?.avatar?'hasface':''}" onclick="filterWho(${q(w)})">${memberFace(w,true)}</button>`).join('')}
-    ${(choreFilterType||choreFilterWho)?`<button class="chip" onclick="clearFilters()">Clear</button>`:''}
+    ${(choreFilterType||choreFilterWho||choreGapsOnly)?`<button class="chip" onclick="clearFilters()">Clear</button>`:''}
   </div>`;
-  let list=D.chores.filter(c=>(!choreFilterType||c.type===choreFilterType)&&(!choreFilterWho||(c.assignees||[]).includes(choreFilterWho)));
+  let list=D.chores.filter(c=>(!choreFilterType||c.type===choreFilterType)&&(!choreFilterWho||(c.assignees||[]).includes(choreFilterWho))
+    &&(!choreGapsOnly||choreGaps(c).length));
   list.sort((a,b)=>{
     if(!!b.priority-!!a.priority) return !!b.priority-!!a.priority;
     return (daysUntil(a.dueBy)??9e9)-(daysUntil(b.dueBy)??9e9);
@@ -909,7 +1143,8 @@ function viewChores(){
 }
 window.filterType=t=>{choreFilterType=choreFilterType===t?null:t;render()};
 window.filterWho=w=>{choreFilterWho=choreFilterWho===w?null:w;render()};
-window.clearFilters=()=>{choreFilterType=choreFilterWho=null;render()};
+window.clearFilters=()=>{choreFilterType=choreFilterWho=null;choreGapsOnly=false;render()};
+window.toggleChoreGaps=()=>{choreGapsOnly=!choreGapsOnly;render()};
 
 window.newChore=()=>{choreDraft={title:'',type:null,recurrence:'none',interval:7,checkIn:'',dueBy:todayISO(),notes:'',assignees:[],priority:false,needsHelp:false};render()};
 window.editChore=id=>{closeSheet();choreDraft={...D.chores.find(x=>x.id===id)};render()};
