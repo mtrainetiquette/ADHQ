@@ -1,0 +1,2248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ADHQ</title>
+<style>
+  :root{
+    /* --- palette: swap this block to re-theme the whole app --- */
+    --bg:#14171c; --panel:#1d2129; --panel-2:#242a34; --line:#39414e;
+    --text:#eef0f3; --muted:#9aa4b2;
+    --accent:#a9dcf5;            /* baby blue */
+    --accent-ink:#08161f;        /* text on accent */
+    --outline:#ffffff;           /* crisp outline on active things */
+    --outline-dim:rgba(255,255,255,.42);
+    --shadow-ink:#000000;
+    /* status colors stay semantic — these signal food safety, not decoration */
+    --fresh:#5fd08a; --soon:#f0a35e; --late:#e8646a; --cool:#6fb3e8; --plum:#b98ae0;
+    --tap:56px; --radius:14px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{background:var(--bg);color:var(--text);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    font-size:17px;line-height:1.45;-webkit-tap-highlight-color:transparent;
+    /* kills double-tap zoom jitter WITHOUT killing pinch-zoom (a11y: WCAG 1.4.4).
+       #draw sets touch-action:none, which is stricter and still wins on the canvas. */
+    touch-action:manipulation}
+  button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+  button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+  input,select,textarea{font:inherit;color:var(--text)}
+  /* screen-reader-only: visible to assistive tech, not on screen.
+     Used to give bare count badges spoken context ("Food, 3 items"). */
+  .sr{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;
+    clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap;border:0}
+  /* respect the OS "reduce motion" setting — vestibular disorders, and some
+     neurodivergent users find movement actively distracting */
+  @media (prefers-reduced-motion:reduce){
+    *,*::before,*::after{animation-duration:.001ms!important;animation-iteration-count:1!important;
+      transition-duration:.001ms!important;scroll-behavior:auto!important}
+  }
+
+  #app{max-width:820px;margin:0 auto 0 96px;min-height:100%;display:flex;flex-direction:column;position:relative}
+  header.top{position:absolute;top:4px;right:16px;z-index:5;text-align:right;pointer-events:none}
+  header.top .now{font-variant-numeric:tabular-nums;line-height:1.1}
+  header.top .now .t{display:block;font-size:30px;font-weight:800;letter-spacing:-.01em;
+    color:var(--accent);text-shadow:0 2px 0 var(--shadow-ink)}
+  header.top .now .d{display:block;font-size:13px;font-weight:700;color:var(--muted)}
+  @media (max-width:400px){header.top .now .t{font-size:24px}header.top .now .d{font-size:11px}}
+  main{flex:1;padding:6px 14px 40px}
+  /* keep the first control row from sliding under the clock */
+  main > .subbar:first-child,main > div:first-child > .subbar:first-child{padding-right:150px}
+
+  nav.tabs{position:fixed;left:0;top:0;bottom:0;z-index:20;width:88px;
+    background:var(--panel);border-right:1px solid var(--line);
+    padding:calc(10px + env(safe-area-inset-top)) 8px 10px}
+  nav.tabs .row{height:100%;display:flex;flex-direction:column;gap:8px;
+    background:none;border:none;padding:0}
+  nav.tabs button{min-height:74px;border-radius:12px;font-weight:700;font-size:12px;color:var(--muted);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;position:relative;
+    border:2px solid transparent}
+  nav.tabs .ico{font-size:28px;line-height:1.1;filter:grayscale(.45) opacity(.75)}
+  nav.tabs button.on{background:var(--panel-2);color:var(--text);
+    border-color:var(--outline);box-shadow:0 0 0 3px var(--shadow-ink), 0 0 0 4px var(--accent)}
+  nav.tabs button.on .ico{filter:none}
+  nav.tabs .n{position:absolute;top:4px;right:6px;min-width:20px;padding:0 5px;border-radius:999px;
+    background:var(--accent);color:var(--accent-ink);font-size:12px;font-weight:800;
+    font-variant-numeric:tabular-nums;border:1px solid var(--shadow-ink)}
+  nav.tabs .n.alert{background:var(--late);color:#fff}
+  nav.tabs .n:empty,nav.tabs .n.zero{display:none}
+  @media (max-width:400px){nav.tabs{width:72px}nav.tabs .ico{font-size:24px}nav.tabs button{font-size:11px;min-height:64px}}
+
+  .micro{font-size:12px;font-weight:800;letter-spacing:.09em;text-transform:uppercase;color:var(--muted)}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius)}
+  .btn{min-height:var(--tap);padding:10px 18px;border-radius:12px;font-weight:700;
+    background:var(--panel-2);border:1px solid var(--line)}
+  .btn.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--outline)}
+  .btn.danger{color:var(--late);border-color:#7f4f59}
+  .btn.ghost{background:none}
+  .btn.sm{min-height:44px;padding:6px 14px;font-size:15px}
+  .chiprow{display:flex;flex-wrap:wrap;gap:8px}
+  .chip{min-height:44px;padding:8px 14px;border-radius:999px;font-weight:600;font-size:15px;
+    background:var(--panel-2);border:1px solid var(--line)}
+  .chip.on{background:var(--accent);color:var(--accent-ink);border-color:var(--outline);
+    box-shadow:0 0 0 2px var(--shadow-ink)}
+  .chip.big{min-height:var(--tap);font-size:17px;padding:10px 20px}
+  .field{width:100%;min-height:var(--tap);padding:12px 14px;border-radius:12px;
+    background:var(--panel-2);border:1px solid var(--line)}
+  textarea.field{min-height:90px;resize:vertical}
+  .stack{display:flex;flex-direction:column;gap:10px}
+  .empty{padding:40px 20px;text-align:center;color:var(--muted)}
+  .empty strong{color:var(--text)}
+  .subbar{display:flex;gap:8px;padding:6px 4px 12px;overflow-x:auto}
+  section.block{padding:16px;margin-top:14px}
+  section.block h3{font-size:16px;font-weight:800;margin-bottom:10px}
+  .rowsplit{display:flex;gap:10px;flex-wrap:wrap}
+  .rowsplit>*{flex:1;min-width:150px}
+  .addrow{display:flex;gap:8px;margin-top:12px}
+  .addrow .field{flex:1}
+
+  .itemcard{display:flex;align-items:center;gap:14px;width:100%;text-align:left;padding:12px 14px;min-height:72px}
+  .itemcard + .itemcard{margin-top:8px}
+  .days{flex:0 0 62px;height:62px;border-radius:14px;display:flex;flex-direction:column;
+    align-items:center;justify-content:center;font-variant-numeric:tabular-nums;
+    background:var(--panel-2);border:1px solid var(--line)}
+  .days b{font-size:22px;font-weight:800;line-height:1}
+  .days span{font-size:11px;font-weight:700;letter-spacing:.06em;color:var(--muted);margin-top:3px}
+  .days.fresh{border-color:var(--fresh)} .days.fresh b{color:var(--fresh)}
+  .days.soon{border-color:var(--soon)}  .days.soon b{color:var(--soon)}
+  .days.late{border-color:var(--late);background:#3b313a}
+  .days.late b{color:var(--late)}
+  .days.none b{color:var(--muted);font-size:18px}
+  .iteminfo{flex:1;min-width:0}
+  .iteminfo .nm{font-size:18px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .iteminfo .meta{color:var(--muted);font-size:14px;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .grouphead{padding:18px 6px 8px}
+  .flags{display:flex;gap:6px;margin-top:4px;flex-wrap:wrap}
+  .flag{font-size:11px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;
+    padding:2px 8px;border-radius:999px}
+  .flag.pri{background:rgba(232,100,106,.20);color:var(--late)}
+  .flag.help{background:rgba(111,179,232,.20);color:var(--cool)}
+  .flag.who{background:var(--panel-2);color:var(--muted)}
+
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px}
+  .grid .chip{justify-content:center;display:flex;align-items:center;min-height:var(--tap)}
+  .suggest{color:var(--muted);font-size:14px;margin-top:8px}
+  .suggest .tag{color:var(--accent)}
+
+  .rev{display:inline-block;padding:2px 10px;border-radius:999px;font-size:12px;font-weight:800;
+    letter-spacing:.05em;text-transform:uppercase}
+  .rev.usda{background:rgba(95,208,138,.18);color:var(--fresh)}
+  .rev.owner{background:rgba(169,220,245,.18);color:var(--accent)}
+  .rev.unrev{background:rgba(154,164,178,.18);color:var(--muted)}
+
+  .scrim{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:30;display:flex;align-items:flex-end;justify-content:center}
+  .sheet{width:100%;max-width:820px;max-height:88vh;overflow-y:auto;background:var(--panel);
+    border:1px solid var(--line);border-radius:22px 22px 0 0;padding:18px 18px calc(24px + env(safe-area-inset-bottom))}
+  .sheet h2{font-size:22px;font-weight:800;letter-spacing:-.01em}
+  .sheet .sub{color:var(--muted);margin-top:2px}
+  .guide{margin-top:14px;padding:14px;background:var(--panel-2);border-radius:12px}
+  .guide dt{margin-top:10px} .guide dt:first-child{margin-top:0} .guide dd{margin-top:3px}
+  .guide .head{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+  .sheet .actions{display:flex;gap:10px;margin-top:18px;flex-wrap:wrap}
+  .sheet .actions .btn{flex:1;min-width:140px}
+  dialog.confirm{border:1px solid var(--line);border-radius:18px;background:var(--panel);color:var(--text);
+    padding:22px;max-width:420px;width:90%}
+  dialog.confirm::backdrop{background:rgba(0,0,0,.55)}
+  dialog.confirm p{margin-bottom:16px}
+  dialog.confirm .actions{display:flex;gap:10px}
+  dialog.confirm .actions .btn{flex:1}
+
+  .shoprow,.listrow{display:flex;align-items:center;gap:12px;padding:8px 14px;min-height:var(--tap)}
+  .shoprow + .shoprow,.listrow + .listrow{border-top:1px solid var(--line)}
+  .shoprow .tick{flex:0 0 40px;height:40px;border-radius:10px;border:2px solid var(--line);
+    display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:800}
+  .shoprow.done .tick{background:var(--fresh);border-color:var(--fresh);color:#0c2416}
+  .shoprow.done .nm{text-decoration:line-through;color:var(--muted)}
+  .shoprow .nm,.listrow .nm{flex:1;text-align:left;font-weight:600}
+  .listrow .cnt{color:var(--muted);font-size:14px;font-variant-numeric:tabular-nums}
+
+  .streak{display:flex;align-items:center;gap:10px;padding:10px 14px;min-height:var(--tap)}
+  .streak + .streak{border-top:1px solid var(--line)}
+  .streak .nm{flex:1;font-weight:600}
+  .streak .flame{font-variant-numeric:tabular-nums;font-weight:800;color:var(--accent)}
+  .streak .best{color:var(--muted);font-size:14px;font-variant-numeric:tabular-nums}
+  .legend{display:flex;flex-wrap:wrap;gap:12px;margin-top:10px;font-size:14px}
+  .legend i{display:inline-block;width:14px;height:4px;border-radius:2px;margin-right:6px;vertical-align:middle}
+
+  .bar{height:10px;border-radius:999px;background:var(--panel-2);overflow:hidden;margin-top:8px}
+  .bar i{display:block;height:100%;background:var(--accent)}
+  .kv{display:flex;justify-content:space-between;padding:6px 0;font-variant-numeric:tabular-nums}
+  .kv + .kv{border-top:1px solid var(--line)}
+  .report{background:var(--panel-2);border-radius:12px;padding:12px;margin-top:12px;font-size:15px;max-height:260px;overflow:auto}
+  .report .bad{color:var(--late)} .report .good{color:var(--fresh)}
+  .report ul{margin:8px 0 0 18px}
+
+  /* ---------- notes board ---------- */
+  .note{padding:12px 14px;margin-top:10px}
+  .note .head{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:14px;margin-bottom:8px}
+  .note .head b{color:var(--text)}
+  .note .head .x{margin-left:auto}
+  .note p.body{white-space:pre-wrap;font-size:18px}
+  .note img{max-width:100%;border-radius:10px;display:block;background:var(--panel-2)}
+  .note audio{width:100%;margin-top:2px}
+  .note .part + .part{margin-top:10px}
+  .partlist{margin:10px 0 0}
+  .partrow{display:flex;align-items:center;gap:10px;padding:8px 10px;background:var(--panel-2);
+    border-radius:10px;margin-top:6px}
+  .partrow .ic{font-size:20px}
+  .partrow .nm{flex:1;font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .toolrow{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+  .composer .modes{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:10px 0}
+  .composer .modes .chip{justify-content:center;display:flex;min-height:var(--tap)}
+  #drawWrap{position:relative;margin-top:10px}
+  #draw{width:100%;border-radius:12px;border:1px solid var(--line);touch-action:none;display:block;background:#20252e}
+  .inkrow{display:flex;gap:8px;margin-top:10px;align-items:center}
+  .ink{width:44px;height:44px;border-radius:50%;border:2px solid var(--line)}
+  .ink.on{border-color:var(--outline);box-shadow:0 0 0 2px var(--shadow-ink)}
+  .rec{display:flex;align-items:center;gap:12px;margin-top:10px}
+  .rec .dot{width:14px;height:14px;border-radius:50%;background:var(--late);animation:blink 1s infinite}
+  @keyframes blink{50%{opacity:.25}}
+  @media (prefers-reduced-motion:reduce){.rec .dot{animation:none}}
+  .face{width:38px;height:38px;border-radius:50%;object-fit:cover;display:block;
+    border:2px solid var(--line);background:var(--panel-2)}
+  .face.sm{width:26px;height:26px;display:inline-block;vertical-align:middle;margin-right:6px}
+  .face.lg{width:64px;height:64px}
+  .chip.on .face{border-color:var(--accent-ink)}
+  .chip.hasface{padding:5px 10px}
+  /* prizes */
+  .prize{display:flex;align-items:center;gap:12px;padding:10px 14px;min-height:var(--tap)}
+  .prize + .prize{border-top:1px solid var(--line)}
+  .prize .lock{font-size:26px;width:34px;text-align:center}
+  .prize .nm{flex:1}
+  .prize .nm b{display:block}
+  .prize .nm span{color:var(--muted);font-size:14px}
+  .prize.open{background:rgba(169,220,245,.10)}
+  .goal{display:flex;align-items:center;gap:12px;padding:12px 14px;margin-top:14px;
+    border:2px dashed #7696aa;border-radius:var(--radius)}
+  .goal .big{font-size:30px}
+  .goal .txt{flex:1}
+  .goal .txt b{display:block;font-size:17px}
+  .goal .txt span{color:var(--muted);font-size:14px}
+  /* shopping, tighter */
+  .storehead{display:flex;align-items:baseline;gap:8px;padding:14px 6px 6px}
+  .shoprow{display:flex;align-items:center;gap:10px;padding:3px 12px;min-height:46px}
+  .shoprow .tick{flex:0 0 34px;height:34px;border-radius:8px;border:2px solid var(--line);
+    display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:800}
+  .shoprow .mv{color:var(--muted);font-size:13px;padding:4px 8px;min-height:34px}
+  /* --- fallback for browsers without flexbox gap (pre-2020); .no-flexgap set at boot --- */
+  .no-flexgap .chiprow,.no-flexgap .subbar,.no-flexgap .toolrow,.no-flexgap .inkrow,
+  .no-flexgap .legend,.no-flexgap .actions,.no-flexgap .rowsplit{margin-left:-4px;margin-right:-4px}
+  .no-flexgap .chiprow>*,.no-flexgap .subbar>*,.no-flexgap .toolrow>*,.no-flexgap .inkrow>*,
+  .no-flexgap .legend>*,.no-flexgap .actions>*,.no-flexgap .rowsplit>*{margin:4px}
+  .no-flexgap .stack>*+*{margin-top:10px}
+  .no-flexgap nav.tabs .row>*+*{margin-top:8px}
+  .no-flexgap .addrow>*+*{margin-left:8px}
+  .no-flexgap .itemcard>*+*,.no-flexgap .listrow>*+*,.no-flexgap .shoprow>*+*,
+  .no-flexgap .streak>*+*,.no-flexgap .prize>*+*,.no-flexgap .partrow>*+*,
+  .no-flexgap .note .head>*+*,.no-flexgap .rec>*+*,.no-flexgap .goal>*+*{margin-left:10px}
+  .no-flexgap .storehead>*+*{margin-left:8px}
+  .toast{position:fixed;left:calc(50% + 44px);bottom:24px;transform:translateX(-50%);z-index:40;
+    background:var(--panel-2);border:1px solid var(--line);border-radius:12px;padding:12px 18px;
+    font-weight:700;opacity:0;transition:opacity .2s;pointer-events:none;max-width:calc(90% - 88px);text-align:center}
+  .toast.show{opacity:1}
+  @media (prefers-reduced-motion:reduce){.toast{transition:none}}
+</style>
+</head>
+<body>
+<div id="app">
+  <header class="top">
+    <span class="now" id="clock"><span class="t"></span><span class="d"></span></span>
+  </header>
+  <main id="main"></main>
+  <nav class="tabs" aria-label="Main sections"><div class="row">
+    <button data-tab="food" class="on"><span class="ico" aria-hidden="true">🥘</span>Food<span class="n" id="nFood" aria-hidden="true">0</span><span class="sr" id="nFoodSR"></span></button>
+    <button data-tab="chores"><span class="ico" aria-hidden="true">🪴</span>Chores<span class="n" id="nChores" aria-hidden="true">0</span><span class="sr" id="nChoresSR"></span></button>
+    <button data-tab="habits"><span class="ico" aria-hidden="true">📈</span>Habits</button>
+    <button data-tab="shop"><span class="ico" aria-hidden="true">💰</span>Shop<span class="n" id="nShop" aria-hidden="true">0</span><span class="sr" id="nShopSR"></span></button>
+    <button data-tab="notes"><span class="ico" aria-hidden="true">💬</span>Notes<span class="n" id="nNotes" aria-hidden="true">0</span><span class="sr" id="nNotesSR"></span></button>
+    <button data-tab="settings"><span class="ico" aria-hidden="true">⚙️</span>Setup</button>
+  </div></nav>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite" aria-atomic="true"></div>
+
+<script>
+/* =====================================================================
+   ADHQ — offline family board
+   Phase 1: food + shopping + categories
+   Phase 2: chores + habits + members + CSV in/out + storage readout
+   No network requests. All data in IndexedDB on this device.
+   ===================================================================== */
+
+/* ---------- embedded food library (stub tier) ---------- */
+const LIBRARY = [
+ {id:'milk-opened',tags:['dairy','fresh'],name:'Milk',aliases:['whole milk','2% milk','skim milk'],category:'Dairy',state:'opened',
+  best:'Fridge shelf',ok:['Fridge door'],cont:'Original packaging',fridge:[5,7],freezer:[90,90],pantry:'NR',
+  signs:['sour smell','curdled texture','yellowing'],tips:'Keep on a shelf, not the door — door temps swing the most.',
+  review:'usda',signsReview:'unrev',source:'USDA FoodKeeper'},
+ {id:'eggs',tags:['eggs','fresh'],name:'Eggs',aliases:['egg'],category:'Dairy',state:'raw in shell',
+  best:'Fridge shelf',ok:[],cont:'Original packaging',fridge:[21,35],pantry:'NR',
+  signs:['sulfur smell when cracked','floats in water'],tips:'Store in the carton on a shelf; the carton slows moisture loss.',
+  review:'usda',signsReview:'unrev',source:'USDA FoodKeeper'},
+ {id:'chicken-raw',tags:['meat','poultry','fresh'],name:'Chicken (raw)',aliases:['raw chicken','chicken breast','chicken thighs'],category:'Protein',state:'raw',
+  best:'Fridge shelf',ok:['Freezer'],cont:'Sealed container',fridge:[1,2],freezer:[270,365],pantry:'NR',
+  signs:['gray or green tint','slimy film','sour smell'],tips:'Bottom shelf, in a container — drips contaminate everything below.',
+  review:'usda',signsReview:'unrev',source:'USDA FoodKeeper'},
+ {id:'chicken-cooked',tags:['meat','poultry','prepared','leftovers'],name:'Chicken (cooked)',aliases:['cooked chicken','rotisserie chicken','leftover chicken'],category:'Leftovers',state:'cooked',
+  best:'Fridge shelf',ok:['Freezer'],cont:'Sealed container',fridge:[3,4],freezer:[60,180],pantry:'NR',
+  signs:['off smell','slimy surface','mold'],tips:'Refrigerate within 2 hours of cooking.',
+  review:'usda',signsReview:'unrev',source:'USDA FoodKeeper'},
+ {id:'beef-ground-raw',tags:['meat','fresh'],name:'Ground beef (raw)',aliases:['ground beef','hamburger meat','mince'],category:'Protein',state:'raw',
+  best:'Fridge shelf',ok:['Freezer'],cont:'Original packaging',fridge:[1,2],freezer:[90,120],pantry:'NR',
+  signs:['brown-gray throughout','sour smell','sticky texture'],tips:'Bottom shelf. Surface browning alone is oxidation, not spoilage.',
+  review:'usda',signsReview:'unrev',source:'USDA FoodKeeper'},
+ {id:'fish-raw',tags:['seafood','fish','fresh'],name:'Fish (raw)',aliases:['salmon','white fish','fillet'],category:'Protein',state:'raw',
+  best:'Fridge shelf',ok:['Freezer'],cont:'Sealed container',fridge:[1,2],freezer:[90,240],pantry:'NR',
+  signs:['ammonia smell','milky slime','dull sunken look'],tips:'Coldest part of the fridge, cook within a day or two.',
+  review:'usda',signsReview:'unrev',source:'USDA FoodKeeper'},
+ {id:'leftovers',tags:['prepared','leftovers'],name:'Leftovers (general)',aliases:['leftover','takeout','takeaway'],category:'Leftovers',state:'cooked',
+  best:'Fridge shelf',ok:['Freezer'],cont:'Sealed container',fridge:[3,4],freezer:[60,90],pantry:'NR',
+  signs:['off smell','mold','fizzy or sour taste'],tips:'Shallow containers cool faster and safer than deep ones.',
+  review:'usda',signsReview:'unrev',source:'USDA FoodKeeper'},
+ {id:'rice-cooked',tags:['grains','prepared','leftovers'],name:'Rice (cooked)',aliases:['cooked rice','leftover rice'],category:'Carb',state:'cooked',
+  best:'Fridge shelf',ok:['Freezer'],cont:'Sealed container',fridge:[3,4],freezer:[30,30],pantry:'NR',
+  signs:['hard dry grains','sour smell','any mold'],tips:'Cool and refrigerate within an hour — B. cereus toxin survives reheating.',
+  review:'owner',signsReview:'owner',source:'Owner research, NHS guidance'},
+ {id:'lettuce',tags:['vegetables','fresh'],name:'Lettuce',aliases:['salad greens','romaine','spring mix'],category:'Produce',state:'whole/unwashed',
+  best:'Crisper drawer',ok:[],cont:'Bag',fridge:[7,10],freezer:'NR',pantry:[0.5,1],
+  signs:['slimy leaves','brown edges','wilted throughout'],tips:'Wrap in a dry paper towel inside a bag to absorb moisture.',
+  review:'usda',signsReview:'unrev',source:'USDA FoodKeeper'},
+ {id:'tomatoes',tags:['vegetables','fruit','fresh'],name:'Tomatoes',aliases:['tomato','cherry tomatoes'],category:'Produce',state:'ripe',
+  best:'Counter',ok:['Fridge shelf'],cont:'Uncovered',fridge:[5,7],pantry:'RIPE',freezer:'NR',
+  signs:['wrinkled skin','leaking','mold at stem'],tips:'Counter until ripe, then fridge. Cold kills the flavor, so bring back to room temp before eating.',
+  review:'usda',signsReview:'unrev',source:'USDA FoodKeeper'},
+ {id:'apples',tags:['fruit','fresh'],name:'Apples',aliases:['apple'],category:'Produce',state:'whole',
+  best:'Crisper drawer',ok:['Counter','Basement'],cont:'Bag',fridge:[28,42],pantry:[7,14],
+  signs:['soft mealy flesh','wrinkled skin','brown spots spreading'],tips:'Apples release ethylene — keep away from other produce. A cool basement beats a warm counter.',
+  review:'usda',signsReview:'unrev',source:'USDA FoodKeeper'},
+ {id:'carrots',tags:['vegetables','fresh'],name:'Carrots',aliases:['carrot','baby carrots'],category:'Produce',state:'whole',
+  best:'Crisper drawer',ok:[],cont:'Sealed container',fridge:[21,28],pantry:[3,5],
+  signs:['white film','rubbery bend','slimy surface'],tips:'Cut the greens off — they pull moisture from the root.',
+  review:'usda',signsReview:'unrev',source:'USDA FoodKeeper'},
+ {id:'potatoes',tags:['vegetables','fresh'],name:'Potatoes',aliases:['potato','russet','yukon gold'],category:'Produce',state:'whole raw',
+  best:'Basement',ok:['Pantry','Cabinet'],cont:'Bag',pantry:[30,60],fridge:'NR',freezer:'NR',
+  signs:['green skin','sprouting eyes','soft or shriveled spots','musty smell'],
+  tips:'Cool, dark, and ventilated — a basement is ideal. Refrigeration converts starch to sugar and darkens them when cooked. Keep away from onions.',
+  review:'usda',signsReview:'owner',source:'USDA FoodKeeper; signs from owner research'},
+ {id:'onions',tags:['vegetables','fresh'],name:'Onions',aliases:['onion','yellow onion'],category:'Produce',state:'whole raw',
+  best:'Pantry',ok:['Basement','Cabinet'],cont:'Uncovered',pantry:[30,60],fridge:[60,60],
+  signs:['soft neck','mold at root','strong off smell','oozing'],
+  tips:'Dry and airy, never in a sealed bag. Store away from potatoes — each spoils the other faster.',
+  review:'usda',signsReview:'owner',source:'USDA FoodKeeper; signs from owner research'},
+ {id:'bananas',tags:['fruit','fresh'],name:'Bananas',aliases:['banana'],category:'Produce',state:'whole',
+  best:'Counter',ok:['Fridge shelf'],cont:'Uncovered',pantry:'RIPE',fridge:[5,7],freezer:[60,90],
+  signs:['fully brown-black skin with fermented smell','leaking flesh'],
+  tips:'Counter until ripe. The fridge blackens the skin but the fruit inside keeps a few days longer.',
+  review:'usda',signsReview:'unrev',source:'USDA FoodKeeper'},
+ {id:'cheese-hard',tags:['dairy','fermented'],name:'Cheese (hard)',aliases:['cheddar','parmesan','swiss'],category:'Dairy',state:'opened',
+  best:'Fridge shelf',ok:['Freezer'],cont:'Wrapped',fridge:[21,42],freezer:[180,180],pantry:'NR',
+  signs:['pink or black mold','ammonia smell'],tips:'Small surface mold on hard cheese can be cut off with a 1-inch margin.',
+  review:'usda',signsReview:'unrev',source:'USDA FoodKeeper'},
+ {id:'yogurt',tags:['dairy','fermented','fresh'],name:'Yogurt',aliases:['greek yogurt'],category:'Dairy',state:'opened',
+  best:'Fridge shelf',ok:[],cont:'Original packaging',fridge:[7,14],pantry:'NR',
+  signs:['excess watery whey plus sour smell','mold','fizzy taste'],tips:'A little liquid on top is normal whey — stir it in.',
+  review:'usda',signsReview:'unrev',source:'USDA FoodKeeper'},
+ {id:'deli-meat-opened',tags:['meat','cured','prepared'],name:'Deli meat (opened)',aliases:['lunch meat','sliced turkey','sliced ham'],category:'Protein',state:'opened',
+  best:'Fridge shelf',ok:['Freezer'],cont:'Sealed container',fridge:[3,5],freezer:[30,60],pantry:'NR',
+  signs:['slimy film','gray edges','sour smell'],tips:'Opened packages go fast — freeze half if you will not finish it.',
+  review:'usda',signsReview:'unrev',source:'USDA FoodKeeper'},
+ {id:'butter',tags:['dairy','oils-fats'],name:'Butter',aliases:['salted butter','unsalted butter'],category:'Dairy',state:'opened',
+  best:'Fridge shelf',ok:['Fridge door','Freezer','Counter'],cont:'Original packaging',fridge:[30,90],freezer:[180,270],pantry:[5,7],
+  signs:['rancid smell','dark yellow edges','sour taste'],tips:'Salted butter tolerates a covered counter dish for about a week; unsalted does not.',
+  review:'usda',signsReview:'unrev',source:'USDA FoodKeeper'},
+ {id:'bread',tags:['baked-goods','grains'],name:'Bread',aliases:['loaf','sandwich bread','sourdough'],category:'Carb',state:'opened',
+  best:'Pantry',ok:['Counter','Freezer','Cabinet'],cont:'Bag',pantry:[4,7],fridge:[7,14],freezer:[90,90],
+  signs:['any visible mold','stale hard texture','musty smell'],
+  tips:'The fridge stales bread faster than the counter — freeze what you cannot finish. Toss the whole loaf if any spot molds.',
+  review:'usda',signsReview:'unrev',source:'USDA FoodKeeper'},
+ {id:'peanut-butter',tags:['nuts-seeds','condiments'],name:'Peanut butter',aliases:['pb'],category:'Sauce',state:'opened',
+  best:'Pantry',ok:['Cabinet','Fridge shelf'],cont:'Original packaging',pantry:[60,90],fridge:[180,240],
+  signs:['rancid or paint-like smell','dark dried surface'],
+  tips:'Shelf-stable jars do not need the fridge; natural grind-your-own kinds do.',
+  review:'usda',signsReview:'unrev',source:'USDA FoodKeeper'},
+ {id:'salsa-opened',tags:['condiments','sauces','vegetables'],name:'Salsa (opened)',aliases:['salsa'],category:'Sauce',state:'opened',
+  best:'Fridge shelf',ok:[],cont:'Original packaging',fridge:[14,30],pantry:'NR',
+  signs:['fizzing','mold at rim','off smell'],tips:'Jarred salsa lasts longer than fresh refrigerated tubs.',
+  review:'unrev',signsReview:'unrev',source:'not yet reviewed'},
+ {id:'honey',tags:['sweeteners','condiments'],name:'Honey',aliases:[],category:'Sauce',state:'unopened or opened',
+  best:'Pantry',ok:['Cabinet'],cont:'Original packaging',pantry:'INDEF',fridge:'NR',
+  signs:['none — crystallizing is normal, warm gently to reverse'],tips:'Never refrigerate; cold forces crystallization.',
+  review:'usda',signsReview:'owner',source:'USDA FoodKeeper; signs from owner research'},
+];
+
+/* sentinel tokens in duration fields */
+const SENTINEL = {
+  NR:{short:'Not recommended', note:'This storage location is not recommended for this item.'},
+  INDEF:{short:'Keeps indefinitely', note:'Keeps indefinitely when stored properly — no deadline suggested.'},
+  PKG:{short:'Follow package date', note:'Use the package use-by date; the library has no independent estimate.'},
+  RIPE:{short:'Depends on ripeness', note:'Timing depends on ripeness rather than a fixed count of days.'},
+};
+const isSentinel = v=>typeof v==='string' && SENTINEL[v];
+
+/* Storage is two separate things, and mixing them was a modeling mistake:
+   WHERE it sits drives shelf life (the library has fridge/freezer/pantry columns),
+   WHAT it's in is useful context but doesn't change which column we read.        */
+const LOCATIONS=[
+  {name:'Fridge shelf',key:'fridge'},
+  {name:'Crisper drawer',key:'fridge'},
+  {name:'Fridge door',key:'fridge'},
+  {name:'Freezer',key:'freezer'},
+  {name:'Counter',key:'pantry'},
+  {name:'Pantry',key:'pantry'},
+  {name:'Cabinet',key:'pantry'},
+  {name:'Basement',key:'pantry',cool:true},
+];
+const CONTAINERS=['Original packaging','Sealed container','Bag','Wrapped','Uncovered'];
+const locKey=name=>LOCATIONS.find(l=>l.name===name)?.key||null;
+const isCool=name=>!!LOCATIONS.find(l=>l.name===name)?.cool;
+/* library tags -> the household's own categories (first match wins, user can override) */
+const TAG2CAT=[
+  [['meat','poultry','seafood','fish','shellfish','soy-protein','beans-legumes'],'Protein'],
+  [['fruit','vegetables','herbs'],'Produce'],
+  [['dairy','eggs'],'Dairy'],
+  [['grains','noodles-pasta','baked-goods','wheat-gluten'],'Carb'],
+  [['spices','condiments','sauces','oils-fats','sweeteners'],'Sauce'],
+  [['leftovers','prepared'],'Leftovers'],
+  [['sweets','nuts-seeds'],'Snacks & sweets'],
+  [['beverages'],'Drinks'],
+];  /* baby-food deliberately unmapped: 6 rows, better as a household-added category */
+function catFromTags(entry){
+  if(!entry) return null;
+  if(entry.category&&D.categories.some(c=>c.name===entry.category)) return entry.category;
+  for(const t of entry.tags||[]) for(const [ts,cat] of TAG2CAT)
+    if(ts.includes(t)&&D.categories.some(c=>c.name===cat)) return cat;
+  return null;
+}
+const DEFAULT_CATS=['Protein','Produce','Dairy','Carb','Sauce','Leftovers','Snacks & sweets','Drinks'];
+const DEFAULT_COMMON=['Milk','Eggs','Leftovers (general)','Chicken (raw)','Chicken (cooked)','Lettuce','Apples','Carrots','Cheese (hard)','Yogurt','Bread','Butter','Ground beef (raw)','Tomatoes','Potatoes','Onions','Bananas','Peanut butter','Deli meat (opened)','Salsa (opened)'];
+const DEFAULT_CHORE_TYPES=['Health','Garbage','Paperwork','Food','Shopping','Cleaning','Outdoors','Pets'];
+const DEFAULT_HABITS=['Vitamins','Exercise','Reading','Water','Instrument','Outside time'];
+const DEFAULT_STORES=['Grocery Store','Costco','Online','Swap','Asian Grocery Store','Monger'];
+const STREAK_GOAL=7;  /* days in a row that earn one prize from the queue */
+const RECURRENCES=[['none','One-off'],['daily','Daily'],['weekly','Weekly'],['monthly','Monthly'],['custom','Every N days']];
+const CAP={cats:50,choreTypes:50,habits:50,members:10,stores:50};
+const REV_LABEL={usda:'USDA-reviewed',owner:'Owner-added',unrev:'Unreviewed'};
+const SERIES=['#f5c84c','#5fd08a','#6fb3e8','#b98ae0','#f0a35e','#e8646a','#7fd9cf','#c9d05f','#e089b8','#8fa6f0'];
+
+/* ---------- edition config ----------
+   ONE codebase, two editions (TRANSFER.md §5a). Do not fork this file.
+   SYNC.enabled=false  -> Local edition. Nothing below ever touches the network;
+                          invariant #1 (works in airplane mode) holds literally.
+   SYNC.enabled=true   -> Connected edition. Structured text only, never blobs. */
+const SYNC={
+  enabled:false,
+  url:'https://ifowaucmvfscjxpsxhqb.supabase.co',
+  key:'sb_publishable_NFGtTymhI0AeZ4tvcqfSBQ_vg-IVmty',
+  schema:'adhq',
+  /* Deliberately excludes `messages` and `prizes`: they carry blobs
+     (drawings, photos, voice memos, prize contents), which never leave
+     the device in either edition. `members` syncs the name only — the
+     avatar blob is stripped on the way out (see scrub()). */
+  stores:['items','categories','shopping','common','members','chores',
+          'choreTypes','choreHistory','habits','habitLogs','stores'],
+};
+const syncable=s=>SYNC.enabled&&SYNC.stores.includes(s);
+
+/* ---------- IndexedDB ---------- */
+const STORES=['items','categories','shopping','common','members','chores','choreTypes','choreHistory','habits','habitLogs','messages','stores','prizes'];
+let db;
+function openDB(){
+  return new Promise((res,rej)=>{
+    const rq=indexedDB.open('adhq',6);
+    rq.onupgradeneeded=e=>{
+      const d=e.target.result;
+      for(const s of STORES) if(!d.objectStoreNames.contains(s)) d.createObjectStore(s,{keyPath:'id',autoIncrement:true});
+      if(!d.objectStoreNames.contains('library')) d.createObjectStore('library',{keyPath:'fid'});
+      if(!d.objectStoreNames.contains('libmeta')) d.createObjectStore('libmeta',{keyPath:'kind'});
+      /* v6: sync bookkeeping — session, cursor, tombstones. Outside STORES,
+         like library/libmeta, so "Erase all data" and CSV backup ignore it. */
+      if(!d.objectStoreNames.contains('sync')) d.createObjectStore('sync',{keyPath:'k'});
+    };
+    rq.onsuccess=e=>{db=e.target.result;res()};
+    rq.onerror=()=>rej(rq.error);
+  });
+}
+function tx(store,mode,fn){
+  return new Promise((res,rej)=>{
+    const t=db.transaction(store,mode),s=t.objectStore(store);
+    const out=fn(s);
+    t.oncomplete=()=>res(out&&out.result!==undefined?out.result:undefined);
+    t.onerror=()=>rej(t.error);
+  });
+}
+const getAll=s=>tx(s,'readonly',st=>st.getAll()).then(r=>r??[]);
+const getOne=(s,k)=>tx(s,'readonly',st=>st.get(k));
+/* raw writes — used by the sync engine when applying remote changes, so that
+   pulling a record doesn't immediately mark it dirty and push it straight back */
+const rawPut=(s,v)=>tx(s,'readwrite',st=>st.put(v));
+const rawDel=(s,k)=>tx(s,'readwrite',st=>st.delete(k));
+const clearStore=s=>tx(s,'readwrite',st=>st.clear());
+const uuid=()=>(globalThis.crypto?.randomUUID?crypto.randomUUID()
+  :'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{
+    const r=Math.random()*16|0; return (c==='x'?r:(r&0x3|0x8)).toString(16)}));
+
+/* Every app write goes through these two. In the Local edition they are the
+   original one-liners. In the Connected edition they additionally stamp a
+   device-independent `uid`, a `modified` clock, and a dirty flag — and record
+   a tombstone on delete, because without one a delete here is simply undone
+   by the next pull from another device. */
+async function put(s,v){
+  if(syncable(s)){ v.uid??=uuid(); v.modified=Date.now(); v._dirty=1; syncSoon(); }
+  return rawPut(s,v);
+}
+async function del(s,k){
+  if(syncable(s)){
+    const rec=await getOne(s,k);
+    if(rec?.uid){ await rawPut('sync',{k:`tomb:${s}:${rec.uid}`,store:s,uid:rec.uid,at:Date.now(),_dirty:1}); syncSoon(); }
+  }
+  return rawDel(s,k);
+}
+
+/* ---------- state ---------- */
+const D={items:[],categories:[],shopping:[],common:[],members:[],chores:[],choreTypes:[],choreHistory:[],habits:[],habitLogs:[]};
+let tab='food', foodSub='list', sortMode='soonest', draft=null, foodSearch='';
+let choreFilterType=null, choreFilterWho=null, choreDraft=null;
+let habitMember=null, habitGraphMode='habit', habitDate=null;
+let settingsPane='members';
+
+async function loadAll(){
+  const got=await Promise.all(STORES.map(getAll));
+  STORES.forEach((s,i)=>D[s]=got[i]);
+  const seed=async(store,names)=>{ if(D[store].length===0){ for(const name of names) await put(store,{name}); D[store]=await getAll(store);} };
+  await seed('categories',DEFAULT_CATS);
+  await seed('common',DEFAULT_COMMON);
+  await seed('choreTypes',DEFAULT_CHORE_TYPES);
+  await seed('habits',DEFAULT_HABITS);
+  await seed('stores',DEFAULT_STORES);
+  await migrateStorage();
+  await migrateUids();
+  await refreshLib();
+}
+/* one-time per store: records created before sync was switched on have no `uid`.
+   The integer `id` stays as the IndexedDB key — 2,000 lines of app code reference
+   it — but it is device-local and collides across devices, so it can never be the
+   sync key. `uid` is. Backfilled records are marked dirty so the first sync
+   uploads them rather than silently leaving them behind. */
+async function migrateUids(){
+  if(!SYNC.enabled) return;
+  for(const s of SYNC.stores){
+    const missing=(D[s]||[]).filter(r=>!r.uid);
+    if(!missing.length) continue;
+    for(const r of missing){ r.uid=uuid(); r.modified??=r.created??Date.now(); r._dirty=1; await rawPut(s,r); }
+    await reload(s);
+  }
+}
+/* one-time: the old model had a single `method` mixing places and containers */
+async function migrateStorage(){
+  const OLD_CONT={'Sealed container':'Sealed container','Original packaging':'Original packaging'};
+  const OLD_LOC={'Fridge shelf':'Fridge shelf','Crisper drawer':'Crisper drawer','Door':'Fridge door','Freezer':'Freezer'};
+  let touched=false;
+  for(const it of D.items){
+    if(it.method===undefined) continue;
+    if(OLD_LOC[it.method]) it.location??=OLD_LOC[it.method];
+    else if(OLD_CONT[it.method]) it.container??=OLD_CONT[it.method];
+    delete it.method; touched=true;
+    await put('items',it);
+  }
+  if(touched) await reload('items');
+}
+const reload=async(...s)=>{ for(const k of s) D[k]=await getAll(k); };
+
+/* ---------- library matching ---------- */
+let LIB=LIBRARY;  /* active library: imported set when present, built-in starter otherwise */
+async function refreshLib(){
+  D.library=await getAll('library'); D.libmeta=await getAll('libmeta');
+  LIB=D.library.length?D.library:LIBRARY;
+}
+const libById=id=>id?LIB.find(e=>e.id===id)||null:null;
+function libFor(item){ return libById(item.libId)||libMatch(item.name); }
+function preferOpened(list){
+  if(list.length<2) return list[0]||null;
+  /* same name, multiple states: prefer the opened variant — its keep times are the
+     conservative ones, and a logged item is more often open than factory-sealed */
+  return list.find(e=>/(^|\W)opened/.test(e.state||'')&&!/unopened/.test(e.state||''))||list[0];
+}
+function libMatch(name){
+  const q=(name||'').trim().toLowerCase(); if(!q) return null;
+  const exact=LIB.filter(e=>e.name.toLowerCase()===q);
+  if(exact.length) return preferOpened(exact);
+  const alias=LIB.filter(e=>e.aliases.some(a=>a.toLowerCase()===q));
+  if(alias.length) return preferOpened(alias);
+  return LIB.find(e=>q.includes(e.name.toLowerCase().split(' (')[0])&&e.name.length>3)
+      || LIB.find(e=>e.aliases.some(a=>q.includes(a.toLowerCase())&&a.length>3))
+      || null;
+}
+/* free-text container phrase -> one of the app's container buttons (miss = null, harmless) */
+function contButton(txt){
+  const s=(txt||'').toLowerCase(); if(!s) return null;
+  if(/original|jar|can\b|carton|packaging/.test(s)) return 'Original packaging';
+  if(/bag/.test(s)) return 'Bag';
+  if(/airtight|sealed|container/.test(s)) return 'Sealed container';
+  if(/wrap|foil/.test(s)) return 'Wrapped';
+  if(/uncover|open dish|plate/.test(s)) return 'Uncovered';
+  return null;
+}
+const ZONE2LOC={fridge:'Fridge shelf',freezer:'Freezer',pantry:'Pantry',counter:'Counter'};
+function libRange(entry,location){
+  if(!entry) return null;
+  const key=locKey(location)||'fridge';
+  const v=entry[key];
+  if(v===undefined) return null;
+  if(isSentinel(v)) return {token:v,where:key,location};
+  return {days:v,where:key,location};
+}
+
+/* ---------- dates ---------- */
+const DAY=86400000;
+const fmtDate=ts=>new Date(ts).toLocaleDateString(undefined,{month:'short',day:'numeric'});
+const todayISO=()=>{const d=new Date();d.setHours(12,0,0,0);return d.toISOString().slice(0,10)};
+const isoPlus=n=>{const d=new Date(Date.now()+n*DAY);d.setHours(12,0,0,0);return d.toISOString().slice(0,10)};
+function daysUntil(iso){
+  if(!iso) return null;
+  const t=new Date();t.setHours(0,0,0,0);
+  const e=new Date(iso+'T00:00:00');
+  return Math.round((e-t)/DAY);
+}
+const daysLeft=it=>daysUntil(it.eatBy);
+function dayClass(d){ if(d===null)return'none'; if(d<0)return'late'; if(d<=2)return'soon'; return'fresh'; }
+function dayChip(d){
+  const cls=dayClass(d);
+  const big=d===null?'—':(d<0?Math.abs(d)+'d':d+'d');
+  const lab=d===null?'no date':(d<0?'over':(d===0?'today':'left'));
+  return `<span class="days ${cls}"><b>${big}</b><span>${lab}</span></span>`;
+}
+function advance(iso,rec,interval,from){
+  const base=new Date((from||iso)+'T12:00:00');
+  if(rec==='daily') base.setDate(base.getDate()+1);
+  else if(rec==='weekly') base.setDate(base.getDate()+7);
+  else if(rec==='monthly'){
+    /* clamp instead of overflowing: Jan 31 + 1 month = Feb 28, not Mar 3 */
+    const day=base.getDate();
+    base.setDate(1); base.setMonth(base.getMonth()+1);
+    const lastDay=new Date(base.getFullYear(),base.getMonth()+1,0).getDate();
+    base.setDate(Math.min(day,lastDay));
+  }
+  else if(rec==='custom') base.setDate(base.getDate()+(interval||1));
+  return base.toISOString().slice(0,10);
+}
+
+/* ---------- utils ---------- */
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const q=s=>JSON.stringify(String(s)).replace(/"/g,'&quot;');
+function toast(msg){const t=$('#toast');t.textContent=msg;t.classList.add('show');clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove('show'),1900)}
+const mediaURLs=new Map();
+const bytes=n=>n<1024?n+' B':n<1048576?(n/1024).toFixed(0)+' KB':(n/1048576).toFixed(1)+' MB';
+
+/* ---------- member avatars (shared: habits, chores, notes, prizes) ---------- */
+function avatarURL(m){
+  if(!m?.avatar) return null;
+  const k='avatar:'+m.id;
+  if(!mediaURLs.has(k)) mediaURLs.set(k,URL.createObjectURL(m.avatar));
+  return mediaURLs.get(k);
+}
+const memberByName=n=>D.members.find(m=>m.name===n);
+/* compact=true -> the picture stands in for the name (filters); else picture + name */
+function memberFace(name,compact){
+  const m=memberByName(name), u=avatarURL(m);
+  if(!u) return esc(name);
+  return compact
+    ? `<img class="face" src="${u}" alt="${esc(name)}" title="${esc(name)}">`
+    : `<img class="face sm" src="${u}" alt=""> ${esc(name)}`;
+}
+
+/* ---------- render ---------- */
+function render(){
+  const overdue=D.chores.filter(c=>(daysUntil(c.dueBy)??99)<0).length;
+  $('#nFood').textContent=D.items.length;
+  $('#nShop').textContent=D.shopping.filter(s=>!s.done).length;
+  const nc=$('#nChores');
+  const dueNow=D.chores.filter(c=>(daysUntil(c.dueBy)??99)<=0).length;
+  nc.textContent=dueNow; nc.classList.toggle('alert',overdue>0);
+  /* a11y: badges are aria-hidden numerals; these give them spoken context. */
+  const say=(id,n,noun)=>{const e=$(id); if(e) e.textContent=n?`, ${n} ${noun}${n===1?'':'s'}`:'';};
+  say('#nFoodSR',D.items.length,'item');
+  say('#nShopSR',D.shopping.filter(s=>!s.done).length,'item to buy');
+  say('#nChoresSR',dueNow,overdue>0?'chore due, some overdue':'chore due');
+  say('#nNotesSR',D.messages.length,'note');
+  document.querySelectorAll('nav.tabs button').forEach(b=>{
+    const on=b.dataset.tab===tab;
+    b.classList.toggle('on',on);
+    on?b.setAttribute('aria-current','page'):b.removeAttribute('aria-current');
+  });
+  const m=$('#main');
+  $('#nNotes').textContent=D.messages.length;
+  $('#nNotes').classList.toggle('zero',D.messages.length===0);
+  m.innerHTML = tab==='food'?viewFood()
+    : tab==='chores'?viewChores()
+    : tab==='habits'?viewHabits()
+    : tab==='shop'?viewShop()
+    : tab==='notes'?viewNotes()
+    : viewSettings();
+  if(tab==='notes') hydrateMedia();
+}
+
+/* ===================== FOOD ===================== */
+function itemCard(it){
+  const meta=[it.category,it.location,it.container,it.eatBy?'eat by '+fmtDate(it.eatBy+'T12:00:00'):null].filter(Boolean).join(' · ');
+  return `<button class="itemcard card" onclick="openItem(${it.id})">
+    ${dayChip(daysLeft(it))}
+    <span class="iteminfo"><span class="nm">${esc(it.name)}</span><span class="meta">${esc(meta)}</span></span>
+  </button>`;
+}
+function itemMatches(it,query){
+  const words=query.toLowerCase().split(/\s+/).filter(Boolean);
+  if(!words.length) return true;
+  const lib=libFor(it);
+  const hay=[it.name,it.category,it.location,it.container,
+    lib?.name,lib?.category,...(lib?.aliases||[]),...(lib?.tags||[])]
+    .filter(Boolean).join(' ').toLowerCase();
+  return words.every(w=>hay.includes(w));
+}
+window.setSearch=v=>{foodSearch=v;render();
+  const el=$('#foodSearch');
+  if(el){el.focus();const n=el.value.length;el.setSelectionRange(n,n)}};
+function viewFood(){
+  const sub=`<div class="subbar">
+    <button class="chip ${foodSub==='list'?'on':''}" onclick="setSub('list')">What's stored</button>
+    <button class="chip ${foodSub==='add'?'on':''}" onclick="setSub('add')">+ Add food</button>
+  </div>`;
+  if(foodSub==='add') return sub+viewAdd();
+  if(D.items.length===0) return sub+`<div class="empty card"><p><strong>Nothing logged yet.</strong></p>
+    <p>Tap <b>+ Add food</b> to log the first thing — fridge, freezer, pantry, counter, cabinet, or basement.</p></div>`;
+  const search=`<div style="padding:0 4px 10px"><input class="field" id="foodSearch" placeholder="Search — try a name, place, or tag like spices…"
+    value="${esc(foodSearch)}" oninput="setSearch(this.value)"></div>`;
+  const modes=[['soonest','Eat soonest'],['category','By category'],['location','By location'],['newest','Newest']];
+  const bar=`<div class="subbar">${modes.map(([k,l])=>
+    `<button class="chip ${sortMode===k?'on':''}" onclick="setSort('${k}')">${l}</button>`).join('')}</div>`;
+  const pool=D.items.filter(it=>itemMatches(it,foodSearch));
+  if(pool.length===0) return sub+search+`<div class="empty card"><p><strong>No matches for "${esc(foodSearch)}".</strong></p>
+    <p>Search covers names, places, and the library's tags and aliases.</p></div>`;
+  let body='';
+  if(sortMode==='category'||sortMode==='location'){
+    const field=sortMode==='category'?'category':'location';
+    const blank=sortMode==='category'?'Uncategorized':'Location not set';
+    const g={}; for(const it of pool)(g[it[field]||blank]??=[]).push(it);
+    const order=sortMode==='location'
+      ? [...LOCATIONS.map(l=>l.name),blank].filter(k=>g[k])
+      : Object.keys(g).sort();
+    body=order.map(k=>{
+      g[k].sort((a,b)=>(daysLeft(a)??9e9)-(daysLeft(b)??9e9));
+      return `<div class="grouphead micro">${esc(k)} · ${g[k].length}</div>${g[k].map(itemCard).join('')}`;
+    }).join('');
+  }else{
+    const s=[...pool].sort(sortMode==='newest'?(a,b)=>b.created-a.created:(a,b)=>(daysLeft(a)??9e9)-(daysLeft(b)??9e9));
+    body=s.map(itemCard).join('');
+  }
+  return sub+search+bar+body;
+}
+window.setSub=s=>{foodSub=s;draft=null;foodSearch='';render()};
+window.setSort=m=>{sortMode=m;render()};
+
+function guideHTML(item,location){
+  const lib=libFor(item); const name=item.name;
+  if(!lib) return `<div class="guide"><span class="micro">Storage guidance</span>
+    <p style="margin-top:6px;color:var(--muted)">No library entry matches "${esc(name)}" yet. Rule of thumb: sealed container, eat cooked food within 3–4 days.</p></div>`;
+  const r=libRange(lib,location);
+  let keep;
+  if(!location) keep='<span style="color:var(--muted)">pick a storage location to see a keep time</span>';
+  else if(!r) keep='<span style="color:var(--muted)">no estimate for this location</span>';
+  else if(r.token) keep=`${SENTINEL[r.token].short} <span style="color:var(--muted)">— ${SENTINEL[r.token].note}</span>`;
+  else{
+    const span=r.days[0]===r.days[1]?r.days[0]+' days':r.days[0]+'–'+r.days[1]+' days';
+    keep=`${span} <span style="color:var(--muted)">(${r.where} conditions)</span>`
+      + (isCool(location)?` <span style="color:var(--muted)">— a cool basement usually reaches the long end of that range</span>`:'');
+  }
+  return `<div class="guide">
+    <div class="head"><span class="micro">Keep time &amp; storage</span><span class="rev ${lib.review}">${REV_LABEL[lib.review]}</span></div>
+    <dl>
+      <dt class="micro">Best stored</dt><dd>${esc(lib.best)}${lib.cont?`, ${esc(lib.cont.toLowerCase())}`:''}${
+        lib.ok?.length?` <span style="color:var(--muted)">(also ok: ${esc(lib.ok.join(', '))})</span>`:''}</dd>
+      <dt class="micro">Typical keep time</dt><dd>${keep}</dd>
+      <dt class="micro">Tip</dt><dd>${esc(lib.tips)}</dd>
+    </dl>
+    <div class="head" style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)">
+      <span class="micro">Spoilage signs</span><span class="rev ${lib.signsReview}">${REV_LABEL[lib.signsReview]}</span></div>
+    <dd style="margin-top:4px">${esc(lib.signs.join(' · '))}</dd>
+    ${lib.aliases?.length?`<dd style="margin-top:8px;color:var(--muted);font-size:14px">Also known as: ${esc(lib.aliases.join(', '))}</dd>`:''}
+    <dd style="margin-top:10px;color:var(--muted);font-size:14px">${esc(lib.source)} · matched "${esc(lib.name)}" (${esc(lib.state)})</dd>
+  </div>`;
+}
+window.openItem=id=>{
+  const it=D.items.find(x=>x.id===id); if(!it)return;
+  showSheet(`
+    <h2>${esc(it.name)}</h2>
+    <p class="sub">${esc(it.category||'Uncategorized')} · ${esc(it.location||'location not set')} · added ${fmtDate(it.created)}</p>
+    ${guideHTML(it,it.location)}
+    <section class="block card"><h3>Eat by</h3>
+      <input class="field" type="date" value="${it.eatBy||''}" onchange="patchItem(${it.id},'eatBy',this.value)"></section>
+    <section class="block card"><h3>Where it's kept</h3><div class="chiprow">${LOCATIONS.map(l=>
+      `<button class="chip ${it.location===l.name?'on':''}" onclick="patchItem(${it.id},'location',${q(l.name)})">${esc(l.name)}</button>`).join('')}</div></section>
+    <section class="block card"><h3>What it's in</h3><div class="chiprow">${CONTAINERS.map(c=>
+      `<button class="chip ${it.container===c?'on':''}" onclick="patchItem(${it.id},'container',${q(c)})">${esc(c)}</button>`).join('')}</div></section>
+    <section class="block card"><h3>Category</h3><div class="chiprow">${D.categories.map(c=>
+      `<button class="chip ${it.category===c.name?'on':''}" onclick="patchItem(${it.id},'category',${q(c.name)})">${esc(c.name)}</button>`).join('')}</div></section>
+    <div class="actions">
+      <button class="btn primary" onclick="finishItem(${it.id})">Finished / Remove</button>
+      <button class="btn ghost" onclick="closeSheet()">Close</button>
+    </div>`);
+};
+window.patchItem=async(id,k,v)=>{
+  const it=D.items.find(x=>x.id===id); if(!it)return;
+  it[k]=v; it.modified=Date.now(); await put('items',it); openItem(id); render();
+};
+window.finishItem=async id=>{
+  const it=D.items.find(x=>x.id===id); if(!it)return;
+  closeSheet();
+  const yes=await confirmBox(`Removed <b>${esc(it.name)}</b>. Add it to the shopping list?`,'Add to list','No thanks');
+  await del('items',id); D.items=D.items.filter(x=>x.id!==id);
+  if(yes){ await put('shopping',{name:it.name,done:false,created:Date.now()}); await reload('shopping'); }
+  toast(yes?`${it.name} → shopping list`:`${it.name} removed`); render();
+};
+
+function viewAdd(){
+  if(!draft) return `<section class="block card"><h3>Common items</h3>
+    <div class="grid">${D.common.map(c=>`<button class="chip" onclick="startDraft(${q(c.name)})">${esc(c.name)}</button>`).join('')}</div>
+    <div class="addrow">
+      <input class="field" id="newName" placeholder="Something else…" onkeydown="if(event.key==='Enter')startFromField()">
+      <button class="btn primary" onclick="startFromField()">Next</button>
+    </div></section>`;
+  const lib=libFor(draft), r=libRange(lib,draft.location);
+  let sug;
+  if(!draft.location) sug=`<p class="suggest">Pick where it's kept and the library will suggest a date.</p>`;
+  else if(r?.days) sug=`<p class="suggest">Suggested from library: ${r.days[0]===r.days[1]?r.days[0]+' days':r.days[0]+'–'+r.days[1]+' days'} in ${r.where} conditions <span class="tag">· ${REV_LABEL[lib.review]}</span> — prefilled the conservative end.</p>`;
+  else if(r?.token) sug=`<p class="suggest">${SENTINEL[r.token].note} <span class="tag">· ${REV_LABEL[lib.review]}</span></p>`;
+  else if(lib) sug=`<p class="suggest">Library matched "${esc(lib.name)}" but has no keep-time for that location.</p>`;
+  else sug=`<p class="suggest">No library match for "${esc(draft.name)}" — set your own date, or leave blank.</p>`;
+  const warn=(r?.token==='NR')?`<p class="suggest" style="color:var(--late)">⚠ ${esc(lib.name)} is not recommended for ${esc(draft.location)}.</p>`:'';
+  return `<section class="block card"><h3>Adding: ${esc(draft.name)}</h3>
+    <div class="stack">
+      <div><div class="micro" style="margin-bottom:8px">Where is it kept?</div>
+        <div class="chiprow">${LOCATIONS.map(l=>`<button class="chip ${draft.location===l.name?'on':''}" onclick="draftSet('location',${q(l.name)})">${esc(l.name)}</button>`).join('')}</div>${warn}</div>
+      <div><div class="micro" style="margin-bottom:8px">What's it in? (optional)</div>
+        <div class="chiprow">${CONTAINERS.map(c=>`<button class="chip ${draft.container===c?'on':''}" onclick="draftSet('container',${q(c)})">${esc(c)}</button>`).join('')}</div></div>
+      <div><div class="micro" style="margin-bottom:8px">Category (optional)</div>
+        <div class="chiprow">${D.categories.map(c=>`<button class="chip ${draft.category===c.name?'on':''}" onclick="draftSet('category',${q(c.name)})">${esc(c.name)}</button>`).join('')}</div></div>
+      <div><div class="micro" style="margin-bottom:8px">Eat by (optional)</div>
+        <input class="field" type="date" value="${draft.eatBy||''}" onchange="draftSet('eatBy',this.value)">${sug}</div>
+    </div>
+    <div class="actions" style="display:flex;gap:10px;margin-top:18px">
+      <button class="btn primary" style="flex:1" onclick="saveDraft()">Add it</button>
+      <button class="btn ghost" onclick="draft=null;render()">Cancel</button>
+    </div></section>`;
+}
+window.startDraft=name=>{
+  draft={name,location:null,container:null,category:null,eatBy:null,libId:null};
+  const lib=libMatch(name);
+  if(lib){
+    draft.libId=lib.id;
+    draft.location=lib.best; draft.container=contButton(lib.cont);
+    draft.category=catFromTags(lib);
+    const r=libRange(lib,draft.location);
+    if(r?.days) draft.eatBy=isoPlus(Math.max(1,Math.round(r.days[0])));
+  }
+  render();
+};
+window.startFromField=async()=>{
+  const v=$('#newName').value.trim(); if(!v)return;
+  if(!D.common.some(c=>c.name.toLowerCase()===v.toLowerCase())){ await put('common',{name:v}); await reload('common'); }
+  startDraft(v);
+};
+window.draftSet=(k,v)=>{
+  draft[k]=(draft[k]===v&&k!=='eatBy')?null:v;
+  if(k==='location'&&!draft._touched){
+    const r=libRange(libMatch(draft.name),draft.location);
+    draft.eatBy=r?.days?isoPlus(Math.max(1,Math.round(r.days[0]))):null; /* location change re-dates */
+  }
+  if(k==='eatBy') draft._touched=true;
+  render();
+};
+window.saveDraft=async()=>{
+  const now=Date.now();
+  await put('items',{name:draft.name,location:draft.location,container:draft.container,category:draft.category,
+    libId:draft.libId||null,eatBy:draft.eatBy||null,created:now,modified:now});
+  await reload('items'); toast(`${draft.name} added`); draft=null; foodSub='list'; render();
+};
+
+/* ===================== CHORES ===================== */
+function choreCard(c){
+  const d=daysUntil(c.dueBy);
+  const who=(c.assignees||[]).join(', ');
+  const meta=[c.type,c.dueBy?'due '+fmtDate(c.dueBy+'T12:00:00'):'no due date',
+    c.recurrence&&c.recurrence!=='none'?recurLabel(c):null].filter(Boolean).join(' · ');
+  const flags=[
+    c.priority?'<span class="flag pri">Priority</span>':'',
+    c.needsHelp?'<span class="flag help">Needs help</span>':'',
+    who?`<span class="flag who">${esc(who)}</span>`:''].join('');
+  return `<button class="itemcard card" onclick="openChore(${c.id})">
+    ${dayChip(d)}
+    <span class="iteminfo"><span class="nm">${esc(c.title)}</span>
+      <span class="meta">${esc(meta)}</span>
+      ${flags?`<span class="flags">${flags}</span>`:''}</span>
+  </button>`;
+}
+const recurLabel=c=>c.recurrence==='custom'?`every ${c.interval} days`:({daily:'daily',weekly:'weekly',monthly:'monthly'}[c.recurrence]||'');
+function viewChores(){
+  if(choreDraft) return viewChoreForm();
+  const sub=`<div class="subbar">
+    <button class="chip on">What's next</button>
+    <button class="chip" onclick="newChore()">+ Add chore</button>
+    <button class="chip" onclick="showHistory()">History</button>
+  </div>`;
+  if(D.chores.length===0) return sub+`<div class="empty card"><p><strong>No chores yet.</strong></p>
+    <p>Tap <b>+ Add chore</b> to set one up.</p></div>`;
+  const types=[...new Set(D.chores.map(c=>c.type).filter(Boolean))];
+  const whos=[...new Set(D.chores.flatMap(c=>c.assignees||[]))];
+  const filters=`<div class="subbar">
+    ${types.map(t=>`<button class="chip ${choreFilterType===t?'on':''}" onclick="filterType(${q(t)})">${esc(t)}</button>`).join('')}
+    ${whos.map(w=>`<button class="chip ${choreFilterWho===w?'on':''} ${memberByName(w)?.avatar?'hasface':''}" onclick="filterWho(${q(w)})">${memberFace(w,true)}</button>`).join('')}
+    ${(choreFilterType||choreFilterWho)?`<button class="chip" onclick="clearFilters()">Clear</button>`:''}
+  </div>`;
+  let list=D.chores.filter(c=>(!choreFilterType||c.type===choreFilterType)&&(!choreFilterWho||(c.assignees||[]).includes(choreFilterWho)));
+  list.sort((a,b)=>{
+    if(!!b.priority-!!a.priority) return !!b.priority-!!a.priority;
+    return (daysUntil(a.dueBy)??9e9)-(daysUntil(b.dueBy)??9e9);
+  });
+  const body=list.length?list.map(choreCard).join(''):`<div class="empty card">Nothing matches that filter.</div>`;
+  return sub+filters+body;
+}
+window.filterType=t=>{choreFilterType=choreFilterType===t?null:t;render()};
+window.filterWho=w=>{choreFilterWho=choreFilterWho===w?null:w;render()};
+window.clearFilters=()=>{choreFilterType=choreFilterWho=null;render()};
+
+window.newChore=()=>{choreDraft={title:'',type:null,recurrence:'none',interval:7,checkIn:'',dueBy:todayISO(),notes:'',assignees:[],priority:false,needsHelp:false};render()};
+window.editChore=id=>{closeSheet();choreDraft={...D.chores.find(x=>x.id===id)};render()};
+function viewChoreForm(){
+  const c=choreDraft;
+  return `<section class="block card"><h3>${c.id?'Edit chore':'New chore'}</h3>
+    <div class="stack">
+      <input class="field" id="cTitle" placeholder="What needs doing?" value="${esc(c.title)}" oninput="choreDraft.title=this.value">
+      <div><div class="micro" style="margin-bottom:8px">Type</div><div class="chiprow">${D.choreTypes.map(t=>
+        `<button class="chip ${c.type===t.name?'on':''}" onclick="cdSet('type',${q(t.name)})">${esc(t.name)}</button>`).join('')}</div></div>
+      <div><div class="micro" style="margin-bottom:8px">Repeats</div><div class="chiprow">${RECURRENCES.map(([k,l])=>
+        `<button class="chip ${c.recurrence===k?'on':''}" onclick="cdSet('recurrence','${k}')">${l}</button>`).join('')}
+        ${c.recurrence==='custom'?`<input class="field" style="width:110px;min-height:44px" type="number" min="1" value="${c.interval}" oninput="choreDraft.interval=+this.value||1">`:''}</div></div>
+      <div class="rowsplit">
+        <div><div class="micro" style="margin-bottom:8px">Check in on</div>
+          <input class="field" type="date" value="${c.checkIn||''}" onchange="choreDraft.checkIn=this.value"></div>
+        <div><div class="micro" style="margin-bottom:8px">Due by</div>
+          <input class="field" type="date" value="${c.dueBy||''}" onchange="choreDraft.dueBy=this.value"></div>
+      </div>
+      <div><div class="micro" style="margin-bottom:8px">Assign to</div><div class="chiprow">${
+        D.members.length?D.members.map(m=>`<button class="chip ${c.assignees.includes(m.name)?'on':''}" onclick="cdWho(${q(m.name)})">${memberFace(m.name,false)}</button>`).join('')
+        :'<span style="color:var(--muted)">Add household names in Setup first.</span>'}</div></div>
+      <div><div class="micro" style="margin-bottom:8px">Notes</div>
+        <textarea class="field" placeholder="How to do it, where things are kept…" oninput="choreDraft.notes=this.value">${esc(c.notes)}</textarea></div>
+      <div class="chiprow">
+        <button class="chip ${c.priority?'on':''}" onclick="cdSet('priority',!choreDraft.priority)">Priority</button>
+        <button class="chip ${c.needsHelp?'on':''}" onclick="cdSet('needsHelp',!choreDraft.needsHelp)">Needs help</button>
+      </div>
+    </div>
+    <div class="actions" style="display:flex;gap:10px;margin-top:18px">
+      <button class="btn primary" style="flex:1" onclick="saveChore()">${c.id?'Save changes':'Add chore'}</button>
+      <button class="btn ghost" onclick="choreDraft=null;render()">Cancel</button>
+    </div></section>`;
+}
+window.cdSet=(k,v)=>{choreDraft[k]=(choreDraft[k]===v&&k==='type')?null:v;render()};
+window.cdWho=n=>{const a=choreDraft.assignees; const i=a.indexOf(n); i<0?a.push(n):a.splice(i,1); render()};
+window.saveChore=async()=>{
+  const c=choreDraft;
+  if(!c.title.trim()) return toast('Give the chore a name');
+  c.title=c.title.trim(); c.modified=Date.now(); c.created??=Date.now();
+  await put('chores',c); await reload('chores');
+  toast(c.id?'Chore saved':'Chore added'); choreDraft=null; render();
+};
+window.openChore=id=>{
+  const c=D.chores.find(x=>x.id===id); if(!c)return;
+  const hist=D.choreHistory.filter(h=>h.choreId===id).sort((a,b)=>b.at-a.at).slice(0,5);
+  showSheet(`
+    <h2>${esc(c.title)}</h2>
+    <p class="sub">${esc(c.type||'no type')} · ${c.dueBy?'due '+fmtDate(c.dueBy+'T12:00:00'):'no due date'}${c.recurrence!=='none'?' · '+recurLabel(c):''}</p>
+    ${c.notes?`<div class="guide"><span class="micro">Notes</span><p style="margin-top:6px;white-space:pre-wrap">${esc(c.notes)}</p></div>`:''}
+    ${c.checkIn?`<p class="sub" style="margin-top:10px">Check in on ${fmtDate(c.checkIn+'T12:00:00')}</p>`:''}
+    <section class="block card"><h3>Mark done by</h3>
+      <div class="chiprow">${D.members.length?D.members.map(m=>
+        `<button class="chip big" onclick="completeChore(${id},${q(m.name)})">${memberFace(m.name,false)}</button>`).join('')
+        :`<button class="chip big" onclick="completeChore(${id},'')">Done</button>
+          <span style="color:var(--muted);align-self:center">Add names in Setup to track who.</span>`}</div></section>
+    ${hist.length?`<div class="guide"><span class="micro">Recent</span>${hist.map(h=>
+      `<p style="margin-top:6px">${esc(h.by||'someone')} · ${fmtDate(h.at)}</p>`).join('')}</div>`:''}
+    <div class="actions">
+      <button class="btn" onclick="editChore(${id})">Edit</button>
+      <button class="btn ${c.needsHelp?'primary':''}" onclick="toggleFlag(${id},'needsHelp')">${c.needsHelp?'Clear needs-help':'Needs help'}</button>
+      <button class="btn danger" onclick="deleteChore(${id})">Delete</button>
+    </div>`);
+};
+window.toggleFlag=async(id,k)=>{const c=D.chores.find(x=>x.id===id);c[k]=!c[k];await put('chores',c);openChore(id);render()};
+window.completeChore=async(id,who)=>{
+  const c=D.chores.find(x=>x.id===id); if(!c)return;
+  await put('choreHistory',{choreId:id,title:c.title,type:c.type,by:who,at:Date.now()});
+  if(c.recurrence==='none'){
+    await del('chores',id);
+    toast(`${c.title} done${who?' by '+who:''}`);
+  }else{
+    const from=todayISO();
+    const nextDue=advance(c.dueBy||from,c.recurrence,c.interval,from);
+    if(c.checkIn){
+      const gap=Math.round((new Date(c.dueBy+'T12:00:00')-new Date(c.checkIn+'T12:00:00'))/DAY);
+      const ci=new Date(nextDue+'T12:00:00'); ci.setDate(ci.getDate()-(gap||0));
+      c.checkIn=ci.toISOString().slice(0,10);
+    }
+    c.dueBy=nextDue; c.needsHelp=false; c.modified=Date.now();
+    await put('chores',c);
+    toast(`${c.title} done — next ${fmtDate(nextDue+'T12:00:00')}`);
+  }
+  await reload('chores','choreHistory'); closeSheet(); render();
+};
+window.deleteChore=async id=>{
+  const c=D.chores.find(x=>x.id===id);
+  closeSheet();
+  if(await confirmBox(`Delete <b>${esc(c.title)}</b>? Its completion history is kept.`,'Delete','Cancel')){
+    await del('chores',id); await reload('chores'); toast('Chore deleted'); render();
+  }
+};
+window.showHistory=()=>{
+  const h=[...D.choreHistory].sort((a,b)=>b.at-a.at).slice(0,60);
+  showSheet(`<h2>Completed chores</h2><p class="sub">Most recent 60. Kept even if the chore is deleted.</p>
+    <section class="block card" style="padding:6px 0">${h.length?h.map(x=>
+      `<div class="listrow"><span class="nm">${esc(x.title)}</span>
+        <span class="cnt">${esc(x.by||'—')} · ${fmtDate(x.at)}</span></div>`).join('')
+      :'<div class="empty">Nothing completed yet.</div>'}</section>
+    <div class="actions"><button class="btn ghost" onclick="closeSheet()">Close</button></div>`);
+};
+
+/* ===================== HABITS ===================== */
+const dayKey=ts=>{const d=new Date(ts);d.setHours(12,0,0,0);return d.toISOString().slice(0,10)};
+function last7(){const out=[];for(let i=6;i>=0;i--)out.push(dayKey(Date.now()-i*DAY));return out}
+function streakFor(member,habit){
+  const days=new Set(D.habitLogs.filter(l=>l.member===member&&l.habit===habit).map(l=>l.day));
+  let n=0,cur=new Date();cur.setHours(12,0,0,0);
+  if(!days.has(cur.toISOString().slice(0,10))) cur.setDate(cur.getDate()-1); /* today not logged yet is ok */
+  while(days.has(cur.toISOString().slice(0,10))){n++;cur.setDate(cur.getDate()-1)}
+  return n;
+}
+function habitDays(member,habit){
+  return [...new Set(D.habitLogs.filter(l=>l.member===member&&l.habit===habit).map(l=>l.day))].sort();
+}
+/* maximal consecutive-day runs, so back-dated entries join runs automatically */
+function runsOf(days){
+  const runs=[]; let run=0,prev=null;
+  for(const d of days){
+    const gap=prev?Math.round((new Date(d+'T12:00:00')-new Date(prev+'T12:00:00'))/DAY):null;
+    run=(gap===1)?run+1:1;
+    if(gap===1) runs[runs.length-1]=run; else runs.push(1);
+    prev=d;
+  }
+  return runs;
+}
+/* every completed STREAK_GOAL inside any run earns one prize — derived from the logs,
+   so editing history re-counts honestly instead of trusting a stored tally */
+function bestStreak(member,habit){
+  const runs=runsOf(habitDays(member,habit));
+  return runs.length?Math.max(...runs):0;
+}
+function milestonesFor(member){
+  const habits=[...new Set(D.habitLogs.filter(l=>l.member===member).map(l=>l.habit))];
+  return habits.reduce((sum,hb)=>sum+runsOf(habitDays(member,hb)).reduce((s,r)=>s+Math.floor(r/STREAK_GOAL),0),0);
+}
+const prizesFor=member=>D.prizes.filter(p=>p.to===member).sort((a,b)=>a.created-b.created);
+function prizeStatus(member){
+  const q=prizesFor(member), earned=milestonesFor(member);
+  const claimed=q.filter((p,i)=>i<earned);
+  return {queue:q,earned,unlocked:claimed.length,locked:q.length-claimed.length};
+}
+function viewHabits(){
+  if(D.members.length===0) return `<div class="empty card"><p><strong>No household names yet.</strong></p>
+    <p>Add names in <b>Setup</b> — habits are logged per person.</p></div>`;
+  const who=habitMember||D.members[0].name;
+  const day=habitDate||dayKey(Date.now());
+  const isToday=day===dayKey(Date.now());
+  const logged=hb=>D.habitLogs.some(l=>l.member===who&&l.habit===hb&&l.day===day);
+  const names=`<div class="subbar">${D.members.map(m=>
+    `<button class="chip big ${who===m.name?'on':''} ${m.avatar?'hasface':''}" onclick="setWho(${q(m.name)})">${memberFace(m.name,true)}</button>`).join('')}</div>`;
+  const dayLabel=isToday?'today':(day===dayKey(Date.now()-DAY)?'yesterday'
+    :new Date(day+'T12:00:00').toLocaleDateString(undefined,{weekday:'long',month:'short',day:'numeric'}));
+  const dates=`<div class="subbar">
+    <button class="chip ${isToday?'on':''}" onclick="setHabitDate(0)">Today</button>
+    <button class="chip ${day===dayKey(Date.now()-DAY)?'on':''}" onclick="setHabitDate(-1)">Yesterday</button>
+    <input class="field" style="width:auto;min-height:44px;padding:6px 10px" type="date" value="${day}"
+      max="${dayKey(Date.now())}" onchange="setHabitDay(this.value)">
+  </div>`;
+  const grid=`<section class="block card"><h3>Tap what ${esc(who)} did ${esc(dayLabel)}</h3>
+    ${dates}
+    <div class="grid">${D.habits.map(hb=>
+      `<button class="chip ${logged(hb.name)?'on':''}" onclick="logHabit(${q(hb.name)})">${esc(hb.name)}${logged(hb.name)?' ✓':''}</button>`).join('')}</div>
+    <p class="suggest">Tapping a checked habit removes that day's entry. Pick any past date to fill in or fix history.</p></section>`;
+  const streaks=`<section class="block card"><h3>${esc(who)}'s streaks</h3>
+    <div style="margin:0 -16px">${D.habits.map(hb=>{
+      const s=streakFor(who,hb.name), best=bestStreak(who,hb.name);
+      const toGo=s>0?STREAK_GOAL-(s%STREAK_GOAL||STREAK_GOAL):STREAK_GOAL;
+      return `<div class="streak"><span class="nm">${esc(hb.name)}</span>
+        <span class="best">${s>0&&toGo<STREAK_GOAL?toGo+' to a prize':''}</span>
+        <span class="flame">${s?s+'d 🔥':'—'}</span><span class="best">best ${best}d</span></div>`;
+    }).join('')}</div>${goalBanner(who)}</section>`;
+  return names+grid+streaks+graphBlock();
+}
+function goalBanner(who){
+  const st=prizeStatus(who);
+  if(st.unlocked>0) return `<div class="goal">
+    <span class="big">🎁</span><span class="txt"><b>${st.unlocked} prize${st.unlocked===1?'':'s'} unlocked for ${esc(who)}!</b>
+    <span>Earned by keeping a ${STREAK_GOAL}-day streak. Tap to open.</span></span>
+    <button class="btn primary" onclick="openPrize(${q(who)})">Open</button></div>`;
+  if(st.locked>0){
+    const best=Math.max(0,...D.habits.map(hb=>streakFor(who,hb.name)));
+    const toGo=best>0?STREAK_GOAL-(best%STREAK_GOAL||STREAK_GOAL):STREAK_GOAL;
+    return `<div class="goal"><span class="big">🎁</span><span class="txt">
+      <b>${st.locked} prize${st.locked===1?'':'s'} waiting for ${esc(who)}</b>
+      <span>${best>0?`${toGo} more day${toGo===1?'':'s'} in a row on any habit unlocks the next one.`
+        :`Keep any habit going ${STREAK_GOAL} days in a row to unlock one.`}</span></span></div>`;
+  }
+  return `<div class="goal"><span class="big">🔥</span><span class="txt">
+    <b>${STREAK_GOAL} days in a row earns a prize</b>
+    <span>Someone in the house can set one up in Setup → Prizes.</span></span></div>`;
+}
+window.setWho=n=>{habitMember=n;render()};
+window.setHabitDate=off=>{habitDate=dayKey(Date.now()+off*DAY);render()};
+window.setHabitDay=v=>{if(v)habitDate=v;render()};
+window.logHabit=async name=>{
+  const who=habitMember||D.members[0].name, day=habitDate||dayKey(Date.now());
+  const before=prizeStatus(who).unlocked;
+  const existing=D.habitLogs.find(l=>l.member===who&&l.habit===name&&l.day===day);
+  if(existing){ await del('habitLogs',existing.id); toast(`Removed ${name} for ${day===dayKey(Date.now())?'today':day}`); }
+  else { await put('habitLogs',{member:who,habit:name,day,at:Date.now()}); }
+  await reload('habitLogs');
+  const after=prizeStatus(who).unlocked;
+  if(after>before){ render(); return celebrate(who); }
+  if(after<before) toast('That change un-earned a prize');
+  else if(!existing) toast(`${name} logged for ${who}`);
+  render();
+};
+function celebrate(who){
+  showSheet(`<h2>🎁 ${esc(who)} earned a prize!</h2>
+    <p class="sub">${STREAK_GOAL} days in a row. There ${prizeStatus(who).unlocked===1?'is 1 prize':'are '+prizeStatus(who).unlocked+' prizes'} ready to open.</p>
+    <div class="actions"><button class="btn primary" onclick="openPrize(${q(who)})">Open it</button>
+      <button class="btn ghost" onclick="closeSheet()">Later</button></div>`);
+}
+function graphBlock(){
+  const days=last7();
+  const series = habitGraphMode==='habit'
+    ? D.habits.map(hb=>({label:hb.name,vals:days.map(d=>D.habitLogs.filter(l=>l.habit===hb.name&&l.day===d).length)}))
+    : D.members.map(m=>({label:m.name,vals:days.map(d=>D.habitLogs.filter(l=>l.member===m.name&&l.day===d).length)}));
+  const active=series.filter(s=>s.vals.some(v=>v>0));
+  const max=Math.max(1,...active.flatMap(s=>s.vals));
+  const W=660,H=180,PL=28,PB=26;
+  const x=i=>PL+i*((W-PL-10)/6), y=v=>H-PB-(v/max)*(H-PB-14);
+  const gridlines=[0,Math.ceil(max/2),max].map(v=>
+    `<line x1="${PL}" y1="${y(v)}" x2="${W-10}" y2="${y(v)}" stroke="var(--line)" stroke-width="1"/>
+     <text x="4" y="${y(v)+4}" fill="var(--muted)" font-size="11">${v}</text>`).join('');
+  const labels=days.map((d,i)=>`<text x="${x(i)}" y="${H-6}" fill="var(--muted)" font-size="11" text-anchor="middle">${
+    new Date(d+'T12:00:00').toLocaleDateString(undefined,{weekday:'narrow'})}</text>`).join('');
+  const lines=active.map((s,si)=>{
+    const col=SERIES[si%SERIES.length];
+    const pts=s.vals.map((v,i)=>`${x(i)},${y(v)}`).join(' ');
+    const dots=s.vals.map((v,i)=>`<circle cx="${x(i)}" cy="${y(v)}" r="3.5" fill="${col}"/>`).join('');
+    return `<polyline points="${pts}" fill="none" stroke="${col}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>${dots}`;
+  }).join('');
+  const legend=active.map((s,si)=>`<span><i style="background:${SERIES[si%SERIES.length]}"></i>${esc(s.label)}</span>`).join('');
+  return `<section class="block card"><h3>Last 7 days</h3>
+    <div class="chiprow" style="margin-bottom:10px">
+      <button class="chip ${habitGraphMode==='habit'?'on':''}" onclick="setGraph('habit')">By habit</button>
+      <button class="chip ${habitGraphMode==='member'?'on':''}" onclick="setGraph('member')">By person</button>
+    </div>
+    ${active.length?`<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Habit logs over the last 7 days">
+      ${gridlines}${labels}${lines}</svg><div class="legend">${legend}</div>`
+      :`<p style="color:var(--muted)">Nothing logged in the last 7 days yet.</p>`}
+  </section>`;
+}
+window.setGraph=m=>{habitGraphMode=m;render()};
+
+/* ===================== SHOPPING ===================== */
+let shopStore=null;
+function viewShop(){
+  if(D.shopping.length===0&&D.stores.length===0) return `<div class="empty card">Add shops in Setup first.</div>`;
+  const add=`<div class="card" style="padding:12px;margin-bottom:12px">
+    <div class="addrow" style="margin:0">
+      <input class="field" id="shopName" placeholder="Add to list…" onkeydown="if(event.key==='Enter')addShop()">
+      <button class="btn primary" onclick="addShop()">Add</button></div>
+    <div class="chiprow" style="margin-top:10px">${D.stores.map(s=>
+      `<button class="chip ${shopStore===s.name?'on':''}" onclick="setShopStore(${q(s.name)})">${esc(s.name)}</button>`).join('')}</div>
+    <p class="suggest">${shopStore?`New items go to <b>${esc(shopStore)}</b>.`:'Pick a shop for new items, or leave unset.'}</p>
+  </div>`;
+  if(D.shopping.length===0) return add+`<div class="empty card"><p><strong>Shopping list is empty.</strong></p>
+    <p>Finishing a food item offers to add it here.</p></div>`;
+  const groups={};
+  for(const s of D.shopping)(groups[s.store||'Anywhere']??=[]).push(s);
+  const order=[...D.stores.map(s=>s.name),'Anywhere'].filter(k=>groups[k]);
+  const body=order.map(k=>{
+    const left=groups[k].filter(s=>!s.done).length;
+    return `<div class="storehead"><span class="micro">${esc(k)}</span>
+      <span class="micro" style="color:var(--accent)">${left} to get</span></div>
+      <section class="card" style="padding:4px 0">${groups[k].map(s=>`
+        <div class="shoprow ${s.done?'done':''}">
+          <button class="tick" aria-label="${s.done?'uncheck':'check'} ${esc(s.name)}" onclick="toggleShop(${s.id})">${s.done?'✓':''}</button>
+          <span class="nm">${esc(s.name)}</span>
+          <button class="mv" onclick="moveShop(${s.id})">move</button>
+        </div>`).join('')}</section>`;
+  }).join('');
+  const done=D.shopping.filter(s=>s.done).length;
+  return add+body+(done?`<div style="margin-top:14px;padding:0 4px">
+    <button class="btn" onclick="clearDone()">Clear checked (${done})</button></div>`:'');
+}
+window.setShopStore=n=>{shopStore=shopStore===n?null:n;render()};
+window.addShop=async()=>{const v=$('#shopName').value.trim();if(!v)return;
+  await put('shopping',{name:v,store:shopStore||null,done:false,created:Date.now()});
+  await reload('shopping');render()};
+window.toggleShop=async id=>{const s=D.shopping.find(x=>x.id===id);s.done=!s.done;await put('shopping',s);render()};
+window.moveShop=id=>{
+  const s=D.shopping.find(x=>x.id===id);
+  showSheet(`<h2>${esc(s.name)}</h2><p class="sub">Which shop?</p>
+    <section class="block card"><div class="chiprow">${D.stores.map(st=>
+      `<button class="chip ${s.store===st.name?'on':''}" onclick="doMoveShop(${id},${q(st.name)})">${esc(st.name)}</button>`).join('')}
+      <button class="chip ${!s.store?'on':''}" onclick="doMoveShop(${id},'')">Anywhere</button></div></section>
+    <div class="actions"><button class="btn danger" onclick="removeShop(${id})">Remove from list</button>
+      <button class="btn ghost" onclick="closeSheet()">Close</button></div>`);
+};
+window.doMoveShop=async(id,store)=>{
+  const s=D.shopping.find(x=>x.id===id); s.store=store||null;
+  await put('shopping',s); await reload('shopping'); closeSheet(); render();
+};
+window.removeShop=async id=>{await del('shopping',id);await reload('shopping');closeSheet();render()};
+window.clearDone=async()=>{for(const s of D.shopping.filter(x=>x.done))await del('shopping',s.id);await reload('shopping');render()};
+
+/* ===================== NOTES (messages & drawings) ===================== */
+let noteAuthor=null, noteMode='text', recState=null;
+/* a note is a list of parts, so one note can carry a drawing AND a voice memo */
+let compParts=[], compTarget='note', pendingBlob=null;
+
+function partURL(scope,id,i,blob){
+  const k=scope+':'+id+':'+i;
+  if(!mediaURLs.has(k)) mediaURLs.set(k,URL.createObjectURL(blob));
+  return mediaURLs.get(k);
+}
+/* older single-part notes still render through the same path */
+const partsOf=m=>m.parts||[{kind:m.kind,text:m.text,blob:m.blob,mime:m.mime}];
+function partHTML(p,scope,id,i){
+  if(p.kind==='text') return `<p class="body">${esc(p.text)}</p>`;
+  if(p.kind==='drawing'||p.kind==='photo') return `<img src="${partURL(scope,id,i,p.blob)}" alt="${p.kind}">`;
+  if(p.kind==='audio') return `<audio controls src="${partURL(scope,id,i,p.blob)}"></audio>`;
+  return '';
+}
+function hydrateMedia(){}
+
+function noteCard(m){
+  const when=new Date(m.created).toLocaleString(undefined,{weekday:'short',hour:'numeric',minute:'2-digit'});
+  const body=partsOf(m).map((p,i)=>`<div class="part">${partHTML(p,'note',m.id,i)}</div>`).join('');
+  return `<div class="note card">
+    <div class="head"><b>${m.author?memberFace(m.author,false):'Someone'}</b><span>· ${when}</span>
+      <button class="btn sm ghost x" onclick="deleteNote(${m.id})">Delete</button></div>
+    ${body}</div>`;
+}
+function viewNotes(){
+  const board=[...D.messages].sort((a,b)=>b.created-a.created);
+  return `<div class="subbar"><button class="chip big on" onclick="openComposer()">+ Leave a note</button></div>
+    ${board.length?board.map(noteCard).join('')
+      :`<div class="empty card"><p><strong>No notes on the board.</strong></p>
+        <p>Text, a scribble, a photo, a voice memo — or several in one note. It stays on this tablet only.</p></div>`}`;
+}
+window.openComposer=()=>{
+  compTarget='note'; compParts=[]; noteMode='text'; pendingBlob=null;
+  showSheet(composerHTML()); setTimeout(initComposer,40);
+};
+
+/* ---- shared composer (notes and prizes) ---- */
+const MODES=[['text','✏️ Text'],['draw','🎨 Draw'],['photo','📷 Photo'],['audio','🎙️ Voice']];
+function partsList(){
+  if(!compParts.length) return `<p class="suggest">Nothing added yet — build a part below, then press <b>Add to note</b>. You can add several.</p>`;
+  return `<div class="partlist">${compParts.map((p,i)=>`
+    <div class="partrow"><span class="ic">${p.kind==='text'?'✏️':p.kind==='drawing'?'🎨':p.kind==='photo'?'📷':'🎙️'}</span>
+      <span class="nm">${p.kind==='text'?esc(p.text.slice(0,40))+(p.text.length>40?'…':''):p.kind+(p.blob?` · ${bytes(p.blob.size)}`:'')}</span>
+      <button class="btn sm danger" onclick="dropPart(${i})">Remove</button></div>`).join('')}</div>`;
+}
+function editorHTML(){
+  if(noteMode==='text') return `<textarea class="field" id="noteText" placeholder="Write it here…"></textarea>`;
+  if(noteMode==='draw') return `<div id="drawWrap"><canvas id="draw" width="700" height="440"></canvas></div>
+    <div class="toolrow" id="tools"></div>
+    <div class="inkrow" id="inks"></div>
+    <div id="textTools"></div>
+    <div class="chiprow" style="margin-top:10px">
+      <button class="chip" onclick="undoDraw()">Undo</button>
+      <button class="chip" onclick="clearDraw()">Clear</button></div>`;
+  if(noteMode==='photo') return `<input class="field" type="file" id="notePhoto" accept="image/*" capture="environment" onchange="photoPicked()">
+    <div id="photoPreview" style="margin-top:10px"></div>`;
+  return `<div class="rec" id="recUI"><button class="btn primary" onclick="toggleRec()">Start recording</button></div>
+    <div id="audioPreview" style="margin-top:10px"></div>
+    <p class="suggest">Recording stays on this tablet — the microphone is only live while the red dot blinks.</p>`;
+}
+function composerHTML(){
+  const authors=D.members.length
+    ? `<div class="chiprow" style="margin-top:6px">${D.members.map(m=>
+        `<button class="chip ${noteAuthor===m.name?'on':''}" onclick="setAuthor(${q(m.name)})">${memberFace(m.name,false)}</button>`).join('')}</div>`
+    : `<p class="suggest">Add household names in Setup to sign notes.</p>`;
+  return `<div class="composer"><h2>Leave a note</h2>
+    <span class="micro" style="display:block;margin-top:10px">From</span>${authors}
+    ${partsList()}
+    <div class="modes">${MODES.map(([k,l])=>
+      `<button class="chip ${noteMode===k?'on':''}" onclick="setNoteMode('${k}')">${l}</button>`).join('')}</div>
+    ${editorHTML()}
+    <div class="actions" style="margin-top:12px">
+      <button class="btn" onclick="addPart()">Add to note</button></div>
+    <div class="actions">
+      <button class="btn primary" onclick="saveNote()">Post it${compParts.length?` (${compParts.length})`:''}</button>
+      <button class="btn ghost" onclick="cancelComposer()">Cancel</button>
+    </div></div>`;
+}
+window.setAuthor=n=>{noteAuthor=noteAuthor===n?null:n;refreshComposer()};
+window.setNoteMode=m=>{stopRecIfAny();noteMode=m;pendingBlob=null;refreshComposer()};
+function refreshComposer(){
+  const s=document.querySelector('#scrim .sheet');
+  if(s){s.innerHTML=compTarget==='prize'?prizeSheet():composerHTML();setTimeout(initComposer,40)}
+}
+window.cancelComposer=()=>{stopRecIfAny();compParts=[];pendingBlob=null;closeSheet()};
+window.dropPart=i=>{compParts.splice(i,1);refreshComposer()};
+window.addPart=async()=>{
+  if(noteMode==='text'){
+    const t=$('#noteText')?.value.trim();
+    if(!t) return toast('Write something first');
+    compParts.push({kind:'text',text:t});
+  }else if(noteMode==='draw'){
+    const cv=$('#draw'); if(!cv) return;
+    const blob=await new Promise(r=>cv.toBlob(r,'image/png'));
+    compParts.push({kind:'drawing',blob,mime:'image/png'});
+  }else if(noteMode==='photo'){
+    if(!pendingBlob) return toast('Pick or take a photo first');
+    compParts.push({kind:'photo',blob:pendingBlob,mime:pendingBlob.type});
+  }else{
+    stopRecIfAny();
+    if(!pendingBlob) return toast('Record something first');
+    compParts.push({kind:'audio',blob:pendingBlob,mime:pendingBlob.type});
+  }
+  pendingBlob=null; toast('Added'); refreshComposer();
+};
+
+/* ---- drawing: pen, text tool, sizes, fonts, undo ---- */
+const INKS=['#ffffff','#a9dcf5','#5fd08a','#f0a35e','#e8646a','#1a1d23'];
+const INK_NAMES={'#ffffff':'white','#a9dcf5':'blue','#5fd08a':'green','#f0a35e':'orange','#e8646a':'red','#1a1d23':'black'};
+const FONTSIZES=[['S',22],['M',34],['L',52],['XL',76]];
+const FONTS=[['Sans','system-ui,sans-serif'],['Serif','Georgia,serif'],['Marker','"Comic Sans MS",cursive']];
+let inkColor=INKS[0], drawTool='pen', fontSize=34, fontFam=FONTS[0][1], undoStack=[];
+function snapshot(cv){
+  const ctx=cv.getContext('2d');
+  undoStack.push(ctx.getImageData(0,0,cv.width,cv.height));
+  if(undoStack.length>8) undoStack.shift();
+}
+window.undoDraw=()=>{
+  const cv=$('#draw'); if(!cv||!undoStack.length) return toast('Nothing to undo');
+  cv.getContext('2d').putImageData(undoStack.pop(),0,0);
+};
+window.setTool=t=>{drawTool=t;paintTools()};
+window.setInk=c=>{inkColor=c;paintTools()};
+window.setSize=n=>{fontSize=n;paintTools()};
+window.setFont=f=>{fontFam=f;paintTools()};
+function paintTools(){
+  const tools=$('#tools'); if(!tools) return;
+  tools.innerHTML=[['pen','✏️ Pen'],['text','🅰 Text']].map(([k,l])=>
+    `<button class="chip ${drawTool===k?'on':''}" onclick="setTool('${k}')">${l}</button>`).join('');
+  $('#inks').innerHTML=INKS.map(c=>
+    `<button class="ink ${c===inkColor?'on':''}" style="background:${c}" aria-label="${INK_NAMES[c]||'ink'} ink" aria-pressed="${c===inkColor}" onclick="setInk('${c}')"></button>`).join('');
+  $('#textTools').innerHTML = drawTool!=='text' ? '' :
+    `<input class="field" id="drawText" placeholder="Type, then tap the canvas to place it" style="margin-top:10px">
+     <div class="chiprow" style="margin-top:8px">${FONTSIZES.map(([l,n])=>
+       `<button class="chip ${fontSize===n?'on':''}" onclick="setSize(${n})">${l}</button>`).join('')}</div>
+     <div class="chiprow" style="margin-top:8px">${FONTS.map(([l,f])=>
+       `<button class="chip ${fontFam===f?'on':''}" style="font-family:${f}" onclick="setFont(${q(f)})">${l}</button>`).join('')}</div>`;
+}
+function initComposer(){
+  if(noteMode!=='draw') return;
+  const cv=$('#draw'); if(!cv) return;
+  const ctx=cv.getContext('2d');
+  ctx.fillStyle='#20252e'; ctx.fillRect(0,0,cv.width,cv.height);
+  ctx.lineCap='round'; ctx.lineJoin='round'; ctx.lineWidth=5;
+  undoStack=[]; paintTools();
+  let down=false,px=0,py=0;
+  const pos=e=>{const r=cv.getBoundingClientRect();
+    return [(e.clientX-r.left)*cv.width/r.width,(e.clientY-r.top)*cv.height/r.height]};
+  cv.onpointerdown=e=>{
+    const [x,y]=pos(e);
+    if(drawTool==='text'){
+      const txt=$('#drawText')?.value;
+      if(!txt||!txt.trim()) return toast('Type the words first, then tap');
+      snapshot(cv);
+      ctx.fillStyle=inkColor; ctx.font=`${fontSize}px ${fontFam}`; ctx.textBaseline='middle';
+      ctx.fillText(txt,x,y);
+      return;
+    }
+    snapshot(cv); down=true; [px,py]=[x,y]; cv.setPointerCapture(e.pointerId);
+  };
+  cv.onpointermove=e=>{if(!down)return;const [x,y]=pos(e);
+    ctx.strokeStyle=inkColor;ctx.beginPath();ctx.moveTo(px,py);ctx.lineTo(x,y);ctx.stroke();[px,py]=[x,y]};
+  cv.onpointerup=cv.onpointercancel=()=>{down=false};
+}
+window.clearDraw=()=>{const cv=$('#draw');if(!cv)return;snapshot(cv);
+  const ctx=cv.getContext('2d');ctx.fillStyle='#20252e';ctx.fillRect(0,0,cv.width,cv.height)};
+
+/* ---- photo ---- */
+window.photoPicked=()=>{
+  const f=$('#notePhoto').files[0]; if(!f)return;
+  pendingBlob=f;
+  $('#photoPreview').innerHTML=`<img src="${URL.createObjectURL(f)}" style="max-width:100%;border-radius:10px" alt="preview">
+    <p class="suggest">${bytes(f.size)} — press <b>Add to note</b> to attach it.</p>`;
+};
+
+/* ---- audio ---- */
+async function startRec(){
+  try{
+    const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+    const rec=new MediaRecorder(stream); const chunks=[];
+    rec.ondataavailable=e=>chunks.push(e.data);
+    rec.onstop=()=>{
+      stream.getTracks().forEach(t=>t.stop());
+      pendingBlob=new Blob(chunks,{type:rec.mimeType||'audio/webm'});
+      const ap=$('#audioPreview');
+      if(ap) ap.innerHTML=`<audio controls src="${URL.createObjectURL(pendingBlob)}"></audio>
+        <p class="suggest">${bytes(pendingBlob.size)} — press <b>Add to note</b> to attach it.</p>`;
+      const ui=$('#recUI'); if(ui) ui.innerHTML=`<button class="btn primary" onclick="toggleRec()">Record again</button>`;
+    };
+    rec.start(); recState={rec,stream};
+    $('#recUI').innerHTML=`<span class="dot"></span><button class="btn danger" onclick="toggleRec()">Stop</button>`;
+  }catch(err){ toast('Microphone unavailable: '+(err.name==='NotAllowedError'?'permission denied':'not found')); }
+}
+function stopRecIfAny(){ if(recState){try{recState.rec.stop()}catch(e){} recState=null} }
+window.toggleRec=()=>{ if(recState){recState.rec.stop();recState=null} else startRec(); };
+
+/* ---- save / delete ---- */
+window.saveNote=async()=>{
+  if(!compParts.length) return toast('Add something to the note first');
+  await put('messages',{author:noteAuthor,created:Date.now(),parts:compParts});
+  compParts=[]; pendingBlob=null;
+  await reload('messages'); closeSheet(); toast('Posted to the board'); render();
+};
+window.deleteNote=async id=>{
+  const m=D.messages.find(x=>x.id===id);
+  const n=partsOf(m).length;
+  if(!await confirmBox(`Take this note${n>1?` and its ${n} parts`:''} off the board? There is no copy anywhere else.`,'Delete','Keep')) return;
+  partsOf(m).forEach((p,i)=>{const k='note:'+id+':'+i;
+    if(mediaURLs.has(k)){URL.revokeObjectURL(mediaURLs.get(k));mediaURLs.delete(k)}});
+  await del('messages',id); await reload('messages'); render();
+};
+
+/* ===================== PRIZES ===================== */
+let prizeDraft=null;
+window.openPrize=async who=>{
+  const st=prizeStatus(who);
+  if(st.unlocked===0){closeSheet();return toast('No prizes unlocked yet')}
+  const p=st.queue[0];
+  const parts=partsOf(p);
+  const body=parts.map((pt,i)=>`<div class="part">${partHTML(pt,'prize',p.id,i)}</div>`).join('');
+  const dl=parts.some(pt=>pt.blob)?`<button class="btn" onclick="downloadPrize(${p.id})">Download</button>`:'';
+  showSheet(`<h2>🎁 A prize for ${esc(who)}</h2>
+    <p class="sub">From ${esc(p.from||'someone in the house')} · queued ${fmtDate(p.created)}${parts.length>1?` · ${parts.length} parts`:''}</p>
+    <div class="guide">${body}</div>
+    ${st.unlocked>1?`<p class="suggest">${st.unlocked-1} more already unlocked behind this one.</p>`:''}
+    <div class="actions">${dl}
+      <button class="btn primary" onclick="consumePrize(${p.id},${q(who)})">Got it — clear this prize</button>
+      <button class="btn ghost" onclick="closeSheet()">Keep it in the queue</button></div>`);
+};
+window.downloadPrize=id=>{
+  const p=D.prizes.find(x=>x.id===id); if(!p) return;
+  partsOf(p).filter(pt=>pt.blob).forEach((pt,i)=>{
+    const ext=(pt.mime||'').includes('png')?'png':(pt.mime||'').includes('audio')?'webm':'jpg';
+    const url=URL.createObjectURL(pt.blob),a=document.createElement('a');
+    a.href=url;a.download=`prize-${id}-${i+1}.${ext}`;document.body.appendChild(a);a.click();a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),1000);
+  });
+};
+window.consumePrize=async(id,who)=>{
+  await del('prizes',id); await reload('prizes'); closeSheet();
+  toast('Prize claimed'); render();
+  const st=prizeStatus(who); if(st.unlocked>0) setTimeout(()=>openPrize(who),400);
+};
+function paneprizes(){
+  const rows=D.members.map(m=>{
+    const st=prizeStatus(m.name);
+    if(!st.queue.length) return `<div class="prize"><span class="lock">·</span>
+      <span class="nm"><b>${memberFace(m.name,false)}</b><span>no prizes queued</span></span></div>`;
+    return st.queue.map((p,i)=>{
+      const open=i<st.earned;
+      const kinds=partsOf(p).map(pt=>pt.kind==='text'?'a written note':pt.kind==='drawing'?'a drawing':pt.kind==='photo'?'a photo':'a voice message');
+      const what=kinds.length>1?`${kinds.length} parts`:kinds[0];
+      return `<div class="prize ${open?'open':''}"><span class="lock">${open?'🎁':'🔒'}</span>
+        <span class="nm"><b>${i===0?memberFace(m.name,false):'&nbsp;'} ${open?'unlocked':'#'+(i+1)+' in queue'}</b>
+          <span>${what} from ${esc(p.from||'—')} · hidden until earned</span></span>
+        <button class="btn sm danger" onclick="deletePrize(${p.id})">Delete</button></div>`;
+    }).join('');
+  }).join('');
+  return `<section class="block card"><h3>Prizes</h3>
+    <p class="suggest" style="margin:0 0 10px">A prize is a note only its recipient can open, and only after a ${STREAK_GOAL}-day habit streak.
+      Contents stay hidden from everyone here — including you — so the surprise survives a shared tablet. Extra prizes stack into a queue, one per streak.</p>
+    <div style="margin:0 -16px">${rows||'<div class="empty">Add household names first.</div>'}</div>
+    <div class="addrow"><button class="btn primary" onclick="newPrize()">+ Set up a prize</button></div>
+  </section>`;
+}
+window.newPrize=()=>{
+  if(D.members.length<2) return toast('Add at least two names first');
+  prizeDraft={from:null,to:null}; compTarget='prize'; compParts=[]; noteMode='text'; pendingBlob=null;
+  showSheet(prizeSheet()); setTimeout(initComposer,40);
+};
+function prizeSheet(){
+  const d=prizeDraft;
+  return `<div class="composer"><h2>Set up a prize</h2>
+    <span class="micro" style="display:block;margin-top:10px">From</span>
+    <div class="chiprow" style="margin-top:6px">${D.members.map(m=>
+      `<button class="chip ${d.from===m.name?'on':''}" onclick="pdSet('from',${q(m.name)})">${memberFace(m.name,false)}</button>`).join('')}</div>
+    <span class="micro" style="display:block;margin-top:12px">For</span>
+    <div class="chiprow" style="margin-top:6px">${D.members.map(m=>
+      `<button class="chip ${d.to===m.name?'on':''}" onclick="pdSet('to',${q(m.name)})">${memberFace(m.name,false)}</button>`).join('')}</div>
+    ${partsList().replace('Add to note','Add to prize')}
+    <div class="modes">${MODES.map(([k,l])=>
+      `<button class="chip ${noteMode===k?'on':''}" onclick="setNoteMode('${k}')">${l}</button>`).join('')}</div>
+    ${editorHTML()}
+    <div class="actions" style="margin-top:12px">
+      <button class="btn" onclick="addPart()">Add to prize</button></div>
+    <div class="actions">
+      <button class="btn primary" onclick="savePrize()">Lock it away${compParts.length?` (${compParts.length})`:''}</button>
+      <button class="btn ghost" onclick="cancelComposer()">Cancel</button></div></div>`;
+}
+window.pdSet=(k,v)=>{prizeDraft[k]=prizeDraft[k]===v?null:v;refreshComposer()};
+window.savePrize=async()=>{
+  const d=prizeDraft;
+  if(!d.to) return toast('Pick who it is for');
+  if(!compParts.length) return toast('Add something to the prize first');
+  await put('prizes',{from:d.from,to:d.to,created:Date.now(),parts:compParts});
+  compParts=[]; pendingBlob=null; prizeDraft=null;
+  await reload('prizes'); closeSheet(); toast(`Prize locked away for ${d.to}`); render();
+};
+window.deletePrize=async id=>{
+  if(!await confirmBox('Delete this prize? Nobody has seen it, and it cannot be recovered.','Delete','Keep')) return;
+  await del('prizes',id); await reload('prizes'); toast('Prize deleted'); render();
+};
+
+/* ===================== SETTINGS ===================== */
+const PANES=[['members','Names'],['prizes','Prizes'],['cats','Categories'],['ctypes','Chore types'],['habits','Habits'],['stores','Stores'],['library','Food library'],['data','Backup'],['sync','Sync'],['storage','Storage']];
+function viewSettings(){
+  const bar=`<div class="subbar">${PANES.map(([k,l])=>
+    `<button class="chip ${settingsPane===k?'on':''}" onclick="setPane('${k}')">${l}</button>`).join('')}</div>`;
+  const pane = settingsPane==='members'?paneList('members','Household names',CAP.members,'Names appear as buttons for chores and habits. Deleting a name keeps their history.')
+    : settingsPane==='cats'?paneList('categories','Food categories',CAP.cats,'Deleting a category in use asks where its items should move — items are never deleted.')
+    : settingsPane==='ctypes'?paneList('choreTypes','Chore types',CAP.choreTypes,'Deleting a type in use asks where its chores should move.')
+    : settingsPane==='habits'?paneList('habits','Habits',CAP.habits,'Deleting a habit keeps its past logs for the record.')
+    : settingsPane==='prizes'?paneprizes()
+    : settingsPane==='stores'?paneList('stores','Shops',CAP.stores,'Shopping items group by shop. Deleting a shop in use asks where its items should move.')
+    : settingsPane==='library'?paneLibrary()
+    : settingsPane==='data'?paneData()
+    : settingsPane==='sync'?paneSync()
+    : paneStorage();
+  return bar+pane;
+}
+window.setPane=p=>{settingsPane=p;render()};
+function usageCount(store,name){
+  if(store==='categories') return D.items.filter(i=>i.category===name).length;
+  if(store==='choreTypes') return D.chores.filter(c=>c.type===name).length;
+  if(store==='habits') return D.habitLogs.filter(l=>l.habit===name).length;
+  if(store==='members') return D.chores.filter(c=>(c.assignees||[]).includes(name)).length+D.habitLogs.filter(l=>l.member===name).length;
+  if(store==='stores') return D.shopping.filter(s=>s.store===name).length;
+  return 0;
+}
+const UNIT={categories:'item',choreTypes:'chore',habits:'log',members:'record',stores:'item'};
+function paneList(store,title,cap,note){
+  const rows=D[store].map(x=>{
+    const n=usageCount(store,x.name);
+    const face=store==='members'
+      ? (x.avatar?`<img class="face" src="${avatarURL(x)}" alt="">`
+         :`<span class="face" style="display:flex;align-items:center;justify-content:center;color:var(--muted)">?</span>`)
+      :'';
+    const photoBtn=store==='members'?`<button class="btn sm" onclick="pickAvatar(${x.id})">Photo</button>`:'';
+    return `<div class="listrow">${face}<span class="nm">${esc(x.name)}</span>${photoBtn}
+      <span class="cnt">${n} ${UNIT[store]}${n===1?'':'s'}</span>
+      <button class="btn sm" onclick="renameEntry('${store}',${x.id})">Rename</button>
+      <button class="btn sm danger" onclick="deleteEntry('${store}',${x.id})">Delete</button></div>`}).join('');
+  return `<section class="block card"><h3>${title}</h3><p class="suggest" style="margin:0 0 10px">${note}</p>
+    <div style="margin:0 -16px">${rows||'<div class="empty">Nothing here yet.</div>'}</div>
+    <div class="addrow">
+      <input class="field" id="entryName" placeholder="Add… (${D[store].length}/${cap})" onkeydown="if(event.key==='Enter')addEntry('${store}',${cap})">
+      <button class="btn primary" onclick="addEntry('${store}',${cap})">Add</button></div></section>`;
+}
+window.addEntry=async(store,cap)=>{
+  const v=$('#entryName').value.trim(); if(!v)return;
+  if(D[store].length>=cap) return toast(`Limit is ${cap}`);
+  if(D[store].some(x=>x.name.toLowerCase()===v.toLowerCase())) return toast('That already exists');
+  await put(store,{name:v}); await reload(store); render();
+};
+window.renameEntry=async(store,id)=>{
+  const e=D[store].find(x=>x.id===id);
+  showSheet(`<h2>Rename</h2><p class="sub">Existing records update to the new name.</p>
+    <section class="block card"><input class="field" id="renameField" value="${esc(e.name)}"></section>
+    <div class="actions"><button class="btn primary" onclick="doRename('${store}',${id})">Save</button>
+    <button class="btn ghost" onclick="closeSheet()">Cancel</button></div>`);
+  setTimeout(()=>$('#renameField')?.focus(),50);
+};
+window.doRename=async(store,id)=>{
+  const e=D[store].find(x=>x.id===id), v=$('#renameField').value.trim();
+  if(!v) return toast('Name cannot be blank');
+  const old=e.name;
+  if(store==='categories') for(const it of D.items.filter(i=>i.category===old)){it.category=v;await put('items',it)}
+  if(store==='choreTypes') for(const c of D.chores.filter(c=>c.type===old)){c.type=v;await put('chores',c)}
+  if(store==='habits') for(const l of D.habitLogs.filter(l=>l.habit===old)){l.habit=v;await put('habitLogs',l)}
+  if(store==='stores') for(const s of D.shopping.filter(s=>s.store===old)){s.store=v;await put('shopping',s)}
+  if(store==='members'){
+    for(const c of D.chores.filter(c=>(c.assignees||[]).includes(old))){c.assignees=c.assignees.map(a=>a===old?v:a);await put('chores',c)}
+    for(const l of D.habitLogs.filter(l=>l.member===old)){l.member=v;await put('habitLogs',l)}
+    for(const p of D.prizes.filter(p=>p.to===old||p.from===old)){
+      if(p.to===old)p.to=v; if(p.from===old)p.from=v; await put('prizes',p)}
+    for(const m of D.messages.filter(m=>m.author===old)){m.author=v;await put('messages',m)}
+    if(habitMember===old) habitMember=v;
+  }
+  e.name=v; await put(store,e);
+  await reload(store,'items','chores','habitLogs','shopping','prizes','messages'); closeSheet(); toast('Renamed'); render();
+};
+window.deleteEntry=async(store,id)=>{
+  const e=D[store].find(x=>x.id===id), n=usageCount(store,e.name);
+  /* members & habits: history is kept as plain names, so a simple confirm is honest */
+  if(store==='members'||store==='habits'||n===0){   /* history keeps plain names, so a simple confirm is honest */
+    const msg=n===0?`Delete <b>${esc(e.name)}</b>? Nothing uses it.`
+      :`Delete <b>${esc(e.name)}</b>? ${n} past record${n===1?'':'s'} stay in history under this name — only the button goes away.`
+        +(store==='members'&&D.prizes.some(p=>p.to===e.name)?` <b>${D.prizes.filter(p=>p.to===e.name).length} queued prize(s) for them will be unreachable.</b>`:'');
+    if(await confirmBox(msg,'Delete','Cancel')){
+      await del(store,id); await reload(store);
+      if(store==='members'&&habitMember===e.name) habitMember=null;
+      toast('Deleted'); render();
+    }
+    return;
+  }
+  /* categories & chore types: force reassignment, never orphan records */
+  const others=D[store].filter(x=>x.id!==id);
+  if(others.length===0) return toast('Keep at least one');
+  const label=store==='categories'?'item':store==='stores'?'item':'chore';
+  showSheet(`<h2>Delete "${esc(e.name)}"</h2>
+    <p class="sub">${n} ${label}${n===1?'':'s'} use this. Pick where they move — nothing is deleted with it.</p>
+    <section class="block card"><div class="chiprow">${others.map(o=>
+      `<button class="chip" onclick="reassign('${store}',${id},${o.id})">${esc(o.name)}</button>`).join('')}</div></section>
+    <div class="actions"><button class="btn ghost" onclick="closeSheet()">Cancel</button></div>`);
+};
+window.reassign=async(store,fromId,toId)=>{
+  const from=D[store].find(x=>x.id===fromId), to=D[store].find(x=>x.id===toId);
+  if(store==='categories') for(const it of D.items.filter(i=>i.category===from.name)){it.category=to.name;it.modified=Date.now();await put('items',it)}
+  if(store==='choreTypes') for(const c of D.chores.filter(c=>c.type===from.name)){c.type=to.name;c.modified=Date.now();await put('chores',c)}
+  if(store==='stores') for(const s of D.shopping.filter(s=>s.store===from.name)){s.store=to.name;await put('shopping',s)}
+  await del(store,fromId);
+  await reload(store,'items','chores','shopping'); closeSheet(); toast(`Moved to ${to.name}`); render();
+};
+
+/* ---------- library import (the real 984-row deal) ---------- */
+const LIBCOLS=['food_id','name','aliases','tags','state','best_storage','ok_storage','best_container',
+ 'fridge_days_min','fridge_days_max','freezer_days_min','freezer_days_max','pantry_days_min','pantry_days_max',
+ 'spoilage_signs','tips','review_status','spoilage_review_status','reviewed_by','source','updated'];
+const REV_IN={'usda-reviewed':'usda','owner-added':'owner','unreviewed':'unrev'};
+function parseLibrary(text,vocab){
+  const rows=parseCSV(text);
+  if(rows.length<2) return {fatal:'No data rows found.'};
+  const head=rows[0].map(c=>c.trim().toLowerCase());
+  const missing=LIBCOLS.filter(c=>!head.includes(c));
+  if(missing.length) return {fatal:`Missing column${missing.length>1?'s':''}: ${missing.join(', ')}.`};
+  const vt=vocab?new Set(vocab.map(v=>v.tag)):null;
+  const whatset=vocab?new Set(vocab.filter(v=>v.facet==='what-it-is').map(v=>v.tag)):null;
+  const entries=[],rejects=[],warns=[],seen=new Set();
+  const dur=(mn,mx,row,zone,errs)=>{
+    mn=mn.trim();mx=mx.trim();
+    if(!mn&&!mx) return undefined;
+    if(SENTINEL[mn]){ if(mx){errs.push(`${zone}: token ${mn} but max is not blank`);return undefined} return mn; }
+    if(SENTINEL[mx]){errs.push(`${zone}: token ${mx} in the max column`);return undefined}
+    const a=parseFloat(mn),b=parseFloat(mx||mn);
+    if(isNaN(a)||isNaN(b)){errs.push(`${zone}: "${mn||mx}" is neither a number nor NR/INDEF/PKG/RIPE`);return undefined}
+    if(a>b){errs.push(`${zone}: min ${a} greater than max ${b}`);return undefined}
+    return [a,b];
+  };
+  for(let i=1;i<rows.length;i++){
+    const r={}; head.forEach((hh,j)=>r[hh]=(rows[i][j]??'').trim());
+    const errs=[],rowWarns=[];
+    if(!r.food_id) {rejects.push(`Row ${i+1}: food_id is blank`);continue}
+    if(seen.has(r.food_id)) {rejects.push(`Row ${i+1}: duplicate food_id "${r.food_id}"`);continue}
+    if(!r.name) {rejects.push(`Row ${i+1} (${r.food_id}): name is blank`);continue}
+    if(!ZONE2LOC[r.best_storage]) {rejects.push(`Row ${i+1} (${r.food_id}): best_storage "${r.best_storage}" is not fridge/freezer/pantry/counter`);continue}
+    const e={
+      id:r.food_id, fid:r.food_id, name:r.name,
+      aliases:r.aliases?r.aliases.split('|').filter(Boolean):[],
+      tags:r.tags?r.tags.split('|').filter(Boolean):[],
+      state:r.state||'', best:ZONE2LOC[r.best_storage],
+      ok:(r.ok_storage?r.ok_storage.split('|'):[]).filter(z=>{
+        if(!z) return false;
+        if(!ZONE2LOC[z]){rowWarns.push(`unknown ok_storage zone "${z}" dropped`);return false}
+        return true}).map(z=>ZONE2LOC[z]),
+      cont:r.best_container||'',
+      signs:r.spoilage_signs?r.spoilage_signs.split('|').filter(Boolean):[],
+      tips:r.tips||'',
+      review:REV_IN[r.review_status]??(rowWarns.push(`review_status "${r.review_status}" treated as unreviewed`),'unrev'),
+      signsReview:REV_IN[r.spoilage_review_status]??(rowWarns.push(`spoilage_review_status "${r.spoilage_review_status}" treated as unreviewed`),'unrev'),
+      reviewedBy:r.reviewed_by||'', source:r.source||'', updated:r.updated||'',
+    };
+    const f=dur(r.fridge_days_min,r.fridge_days_max,r,'fridge',errs);
+    const z=dur(r.freezer_days_min,r.freezer_days_max,r,'freezer',errs);
+    const p=dur(r.pantry_days_min,r.pantry_days_max,r,'pantry',errs);
+    if(errs.length){rejects.push(`Row ${i+1} (${r.food_id}): ${errs.join('; ')}`);continue}
+    if(f!==undefined)e.fridge=f; if(z!==undefined)e.freezer=z; if(p!==undefined)e.pantry=p;
+    if(vt){
+      const unk=e.tags.filter(t=>!vt.has(t));
+      if(unk.length) rowWarns.push(`unknown tag${unk.length>1?'s':''}: ${unk.join(', ')}`);
+      if(whatset&&!e.tags.some(t=>whatset.has(t))) rowWarns.push('no what-it-is tag');
+    }
+    if(rowWarns.length) warns.push(`Row ${i+1} (${r.food_id}): ${rowWarns.join('; ')}`);
+    seen.add(r.food_id); entries.push(e);
+  }
+  return {entries,rejects,warns,taggedAgainstVocab:!!vt};
+}
+function parseVocab(text){
+  const rows=parseCSV(text);
+  if(rows.length<2) return null;
+  const head=rows[0].map(c=>c.trim().toLowerCase());
+  if(!head.includes('tag')||!head.includes('facet')) return null;
+  return rows.slice(1).map(r=>{const o={};head.forEach((hh,j)=>o[hh]=(r[j]??'').trim());return o})
+    .filter(o=>o.tag);
+}
+
+/* ---------- member photos ---------- */
+window.pickAvatar=id=>{
+  const m=D.members.find(x=>x.id===id);
+  showSheet(`<h2>Photo for ${esc(m.name)}</h2>
+    <p class="sub">Used instead of their name on the habit and chore buttons. Stays on this tablet.</p>
+    ${m.avatar?`<div class="guide" style="text-align:center"><img class="face lg" style="margin:0 auto" src="${avatarURL(m)}" alt=""></div>`:''}
+    <section class="block card">
+      <input class="field" type="file" accept="image/*" onchange="setAvatar(${id},this)"></section>
+    <div class="actions">
+      ${m.avatar?`<button class="btn danger" onclick="clearAvatar(${id})">Remove photo</button>`:''}
+      <button class="btn ghost" onclick="closeSheet()">Close</button></div>`);
+};
+window.setAvatar=async(id,inp)=>{
+  const f=inp.files[0]; if(!f) return;
+  const m=D.members.find(x=>x.id===id);
+  const blob=await shrinkImage(f,256);
+  m.avatar=blob; await put('members',m);
+  mediaURLs.delete('avatar:'+id);
+  await reload('members'); closeSheet(); toast('Photo set'); render();
+};
+window.clearAvatar=async id=>{
+  const m=D.members.find(x=>x.id===id);
+  delete m.avatar; await put('members',m);
+  mediaURLs.delete('avatar:'+id);
+  await reload('members'); closeSheet(); render();
+};
+/* square-crop and downscale so ten faces cost kilobytes, not megabytes */
+function shrinkImage(file,size){
+  return new Promise(res=>{
+    const img=new Image(), url=URL.createObjectURL(file);
+    img.onload=()=>{
+      const c=document.createElement('canvas'); c.width=c.height=size;
+      const ctx=c.getContext('2d');
+      const s=Math.min(img.width,img.height);
+      ctx.drawImage(img,(img.width-s)/2,(img.height-s)/2,s,s,0,0,size,size);
+      URL.revokeObjectURL(url);
+      c.toBlob(b=>res(b),'image/jpeg',0.82);
+    };
+    img.onerror=()=>{URL.revokeObjectURL(url);res(file)};
+    img.src=url;
+  });
+}
+
+/* ---------- CSV ---------- */
+const TABLES={
+  food_items:{store:'items',cols:['name','category','location','container','lib_food_id','eat_by','created','modified'],
+    ex:['Milk','Dairy','Fridge shelf','Original packaging','milk-opened','2026-08-08','',''],
+    out:i=>[i.name,i.category,i.location,i.container,i.libId,i.eatBy,new Date(i.created).toISOString(),new Date(i.modified||i.created).toISOString()],
+    inn:(r,errs)=>{
+      if(!r.name?.trim()) return errs.push('name is blank'),null;
+      if(r.eat_by&&!/^\d{4}-\d{2}-\d{2}$/.test(r.eat_by)) return errs.push('eat_by must be YYYY-MM-DD'),null;
+      if(r.location&&!LOCATIONS.some(l=>l.name.toLowerCase()===r.location.toLowerCase()))
+        return errs.push(`location "${r.location}" is not one of: ${LOCATIONS.map(l=>l.name).join(', ')}`),null;
+      const t=Date.parse(r.created)||Date.now();
+      return {name:r.name.trim(),category:r.category||null,
+        location:r.location?LOCATIONS.find(l=>l.name.toLowerCase()===r.location.toLowerCase()).name:null,
+        container:r.container||null,libId:r.lib_food_id||null,eatBy:r.eat_by||null,created:t,modified:Date.parse(r.modified)||t};
+    }},
+  categories:{store:'categories',cols:['name'],ex:['Protein'],
+    out:c=>[c.name], inn:(r,errs)=>r.name?.trim()?{name:r.name.trim()}:(errs.push('name is blank'),null)},
+  shopping_list:{store:'shopping',cols:['name','shop','done'],ex:['Milk','Grocery Store','no'],
+    out:s=>[s.name,s.store,s.done?'yes':'no'],
+    inn:(r,errs)=>r.name?.trim()?{name:r.name.trim(),store:r.shop||null,
+      done:/^(yes|true|1)$/i.test(r.done||''),created:Date.now()}:(errs.push('name is blank'),null)},
+  shops:{store:'stores',cols:['name'],ex:['Grocery Store'],
+    out:s=>[s.name], inn:(r,errs)=>r.name?.trim()?{name:r.name.trim()}:(errs.push('name is blank'),null)},
+  chores:{store:'chores',cols:['title','type','recurrence','interval_days','check_in','due_by','assignees','priority','needs_help','notes'],
+    ex:['Take out recycling','Garbage','weekly','','','2026-08-10','Alex|Sam','no','no','Blue bin, curb by 7am'],
+    out:c=>[c.title,c.type,c.recurrence,c.interval,c.checkIn,c.dueBy,(c.assignees||[]).join('|'),
+      c.priority?'yes':'no',c.needsHelp?'yes':'no',c.notes],
+    inn:(r,errs)=>{
+      if(!r.title?.trim()) return errs.push('title is blank'),null;
+      const rec=(r.recurrence||'none').toLowerCase();
+      if(!RECURRENCES.some(([k])=>k===rec)) return errs.push(`recurrence "${r.recurrence}" is not one of: none, daily, weekly, monthly, custom`),null;
+      if(rec==='custom'&&!(+r.interval_days>0)) return errs.push('custom recurrence needs interval_days'),null;
+      for(const f of ['check_in','due_by']) if(r[f]&&!/^\d{4}-\d{2}-\d{2}$/.test(r[f])) return errs.push(`${f} must be YYYY-MM-DD`),null;
+      return {title:r.title.trim(),type:r.type||null,recurrence:rec,interval:+r.interval_days||7,
+        checkIn:r.check_in||'',dueBy:r.due_by||'',assignees:(r.assignees||'').split('|').filter(Boolean),
+        priority:/^(yes|true|1)$/i.test(r.priority||''),needsHelp:/^(yes|true|1)$/i.test(r.needs_help||''),
+        notes:r.notes||'',created:Date.now(),modified:Date.now()};
+    }},
+  chore_types:{store:'choreTypes',cols:['name'],ex:['Garbage'],
+    out:t=>[t.name], inn:(r,errs)=>r.name?.trim()?{name:r.name.trim()}:(errs.push('name is blank'),null)},
+  chore_history:{store:'choreHistory',cols:['title','type','completed_by','completed_at'],
+    ex:['Take out recycling','Garbage','Alex','2026-08-01T18:04:00.000Z'],
+    out:h=>[h.title,h.type,h.by,new Date(h.at).toISOString()],
+    inn:(r,errs)=>{
+      if(!r.title?.trim()) return errs.push('title is blank'),null;
+      const t=Date.parse(r.completed_at);
+      if(isNaN(t)) return errs.push('completed_at is not a valid date'),null;
+      return {choreId:null,title:r.title.trim(),type:r.type||null,by:r.completed_by||'',at:t};
+    }},
+  members:{store:'members',cols:['name'],ex:['Alex'],
+    out:m=>[m.name], inn:(r,errs)=>r.name?.trim()?{name:r.name.trim()}:(errs.push('name is blank'),null)},
+  habits:{store:'habits',cols:['name'],ex:['Vitamins'],
+    out:h=>[h.name], inn:(r,errs)=>r.name?.trim()?{name:r.name.trim()}:(errs.push('name is blank'),null)},
+  habit_logs:{store:'habitLogs',cols:['member','habit','day','logged_at'],
+    ex:['Alex','Vitamins','2026-08-01','2026-08-01T08:12:00.000Z'],
+    out:l=>[l.member,l.habit,l.day,new Date(l.at).toISOString()],
+    inn:(r,errs)=>{
+      if(!r.member?.trim()) return errs.push('member is blank'),null;
+      if(!r.habit?.trim()) return errs.push('habit is blank'),null;
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(r.day||'')) return errs.push('day must be YYYY-MM-DD'),null;
+      return {member:r.member.trim(),habit:r.habit.trim(),day:r.day,at:Date.parse(r.logged_at)||Date.parse(r.day+'T12:00:00')};
+    }},
+};
+const csvCell=v=>{const s=String(v??'');return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s};
+const toCSV=rows=>rows.map(r=>r.map(csvCell).join(',')).join('\r\n');
+function parseCSV(text){
+  const rows=[];let row=[],cur='',inQ=false;
+  text=text.replace(/^\uFEFF/,'');
+  for(let i=0;i<text.length;i++){
+    const c=text[i];
+    if(inQ){ if(c==='"'){ if(text[i+1]==='"'){cur+='"';i++} else inQ=false } else cur+=c }
+    else if(c==='"') inQ=true;
+    else if(c===','){row.push(cur);cur=''}
+    else if(c==='\n'){row.push(cur);rows.push(row);row=[];cur=''}
+    else if(c!=='\r') cur+=c;
+  }
+  if(cur||row.length){row.push(cur);rows.push(row)}
+  return rows.filter(r=>r.some(c=>c.trim()!==''));
+}
+function download(name,text){
+  const blob=new Blob([text],{type:'text/csv'});
+  const url=URL.createObjectURL(blob), a=document.createElement('a');
+  a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+window.exportTable=key=>{
+  const t=TABLES[key];
+  download(`adhq-${key}-${todayISO()}.csv`, toCSV([t.cols,...D[t.store].map(t.out)]));
+  toast(`Exported ${D[t.store].length} rows`);
+};
+window.exportAll=()=>{
+  for(const k of Object.keys(TABLES)) setTimeout(()=>exportTable(k),80*Object.keys(TABLES).indexOf(k));
+  toast('Exporting every table…');
+};
+window.templateFor=key=>{
+  const t=TABLES[key];
+  download(`template-${key}.csv`, toCSV([t.cols,t.ex]));
+  toast('Template downloaded');
+};
+function paneLibrary(){
+  const meta=(D.libmeta||[]).find(m=>m.kind==='lib');
+  const vmeta=(D.libmeta||[]).find(m=>m.kind==='vocab');
+  const active=D.library?.length
+    ? `<div class="kv"><span>Active library</span><b>${D.library.length} entries (imported)</b></div>
+       <div class="kv"><span>From file</span><b>${esc(meta?.file||'—')}</b></div>
+       <div class="kv"><span>Imported</span><b>${meta?fmtDate(meta.at):'—'}</b></div>
+       <div class="kv"><span>Review mix</span><b>${['usda','owner','unrev'].map(k=>{
+          const n=D.library.filter(e=>e.review===k).length;return n?`${n} ${REV_LABEL[k]}`:''}).filter(Boolean).join(' · ')}</b></div>`
+    : `<div class="kv"><span>Active library</span><b>Built-in starter set (${LIBRARY.length} entries)</b></div>`;
+  const vocabLine=vmeta
+    ? `<p class="suggest">Vocabulary loaded: ${vmeta.tags.length} tags from ${esc(vmeta.file)} — imports are checked against it.</p>`
+    : `<p class="suggest">No tag vocabulary loaded yet. Import it first so library rows can be checked against the controlled tag list.</p>`;
+  return `<section class="block card"><h3>Food storage library</h3>
+    ${active}${vocabLine}
+    <div class="stack" style="margin-top:12px">
+      <div><span class="micro">1 · Tag vocabulary (CSV: tag, facet, notes)</span>
+        <input class="field" type="file" accept=".csv,text/csv" style="margin-top:6px" onchange="importVocab(this)"></div>
+      <div><span class="micro">2 · Library (CSV, ${LIBCOLS.length} columns)</span>
+        <input class="field" type="file" accept=".csv,text/csv" style="margin-top:6px" onchange="importLib(this)"></div>
+    </div>
+    <div id="libReport"></div>
+    ${D.library?.length?`<div class="addrow"><button class="btn danger" onclick="dropLibrary()">Remove imported library (revert to starter set)</button></div>`:''}
+    <p class="suggest" style="margin-top:10px">The library is reference content: it survives "Erase all data" and is replaced whole on each import. Items keep their lib_food_id links, so re-importing an updated file re-connects them automatically.</p>
+  </section>`;
+}
+function libReport(html){const el=$('#libReport');if(el)el.innerHTML=`<div class="report">${html}</div>`}
+window.importVocab=async inp=>{
+  const f=inp.files[0]; if(!f)return;
+  const v=parseVocab(await f.text());
+  if(!v) return libReport('<p class="bad">That file does not look like the vocabulary — it needs tag and facet columns.</p>');
+  await put('libmeta',{kind:'vocab',tags:v,file:f.name,at:Date.now()});
+  await refreshLib(); render();
+  toast(`Vocabulary loaded: ${v.length} tags`);
+};
+window.importLib=async inp=>{
+  const f=inp.files[0]; if(!f)return;
+  const vmeta=(D.libmeta||[]).find(m=>m.kind==='vocab');
+  const res=parseLibrary(await f.text(),vmeta?.tags||null);
+  if(res.fatal) return libReport(`<p class="bad">${esc(res.fatal)}</p><p style="margin-top:6px">Nothing was changed.</p>`);
+  const {entries,rejects,warns}=res;
+  if(!entries.length) return libReport(`<p class="bad">Every row was rejected (${rejects.length}).</p><ul>${rejects.slice(0,20).map(x=>`<li>${esc(x)}</li>`).join('')}</ul>`);
+  const cur=D.library?.length?`replacing the ${D.library.length} imported entries`:'replacing the built-in starter set';
+  const okGo=await confirmBox(
+    `Import <b>${entries.length}</b> entries from ${esc(f.name)} (${cur})?`+
+    (rejects.length?` <b>${rejects.length}</b> row${rejects.length===1?'':'s'} will be skipped.`:'')+
+    (warns.length?` ${warns.length} warning${warns.length===1?'':'s'} noted.`:''),
+    'Import','Cancel');
+  if(!okGo) return;
+  await clearStore('library');
+  for(const e of entries) await put('library',e);
+  await put('libmeta',{kind:'lib',file:f.name,at:Date.now(),rejected:rejects.length,warned:warns.length});
+  await refreshLib(); render();
+  libReport(`<p class="good">Imported ${entries.length} entries — the app is now using this library.</p>
+    ${res.taggedAgainstVocab?'':'<p style="margin-top:6px">Tags were not checked (no vocabulary loaded).</p>'}
+    ${rejects.length?`<p class="bad" style="margin-top:8px">Rejected ${rejects.length}:</p><ul>${rejects.slice(0,20).map(x=>`<li>${esc(x)}</li>`).join('')}</ul>${rejects.length>20?`<p>…and ${rejects.length-20} more.</p>`:''}`:''}
+    ${warns.length?`<p style="margin-top:8px;color:var(--soon)">Warnings (imported anyway) — ${warns.length}:</p><ul>${warns.slice(0,20).map(x=>`<li>${esc(x)}</li>`).join('')}</ul>${warns.length>20?`<p>…and ${warns.length-20} more.</p>`:''}`:''}`);
+  inp.value='';
+};
+window.dropLibrary=async()=>{
+  if(!await confirmBox('Remove the imported library and go back to the built-in starter set? Your logged food items are untouched.','Remove','Keep')) return;
+  await clearStore('library');
+  await tx('libmeta','readwrite',st=>st.delete('lib'));
+  await refreshLib(); render(); toast('Reverted to the starter set');
+};
+function paneData(){
+  return `<section class="block card"><h3>Export</h3>
+    <p class="suggest" style="margin:0 0 10px">Files land in the tablet's Downloads folder. Copy them to a USB drive or SD card from the Files app — nothing leaves this device on its own.</p>
+    <div class="chiprow">${Object.keys(TABLES).map(k=>
+      `<button class="chip" onclick="exportTable('${k}')">${k.replace(/_/g,' ')}</button>`).join('')}</div>
+    <div class="addrow"><button class="btn primary" onclick="exportAll()">Export everything</button></div>
+  </section>
+  <section class="block card"><h3>Templates</h3>
+    <p class="suggest" style="margin:0 0 10px">Blank file with the header row and one example row, for bulk-entering on a computer.</p>
+    <div class="chiprow">${Object.keys(TABLES).map(k=>
+      `<button class="chip" onclick="templateFor('${k}')">${k.replace(/_/g,' ')}</button>`).join('')}</div>
+  </section>
+  <section class="block card"><h3>Import</h3>
+    <p class="suggest" style="margin:0 0 10px">Every row is checked before anything is written. Bad rows are reported and skipped; good rows still import.</p>
+    <div class="stack">
+      <select class="field" id="impTable">${Object.keys(TABLES).map(k=>`<option value="${k}">${k.replace(/_/g,' ')}</option>`).join('')}</select>
+      <div class="chiprow">
+        <button class="chip ${importMode==='append'?'on':''}" onclick="setImportMode('append')">Add to existing</button>
+        <button class="chip ${importMode==='replace'?'on':''}" onclick="setImportMode('replace')">Replace table</button>
+      </div>
+      <input class="field" type="file" id="impFile" accept=".csv,text/csv" onchange="doImport()">
+    </div>
+    <div id="impReport"></div>
+  </section>`;
+}
+let importMode='append';
+window.setImportMode=m=>{importMode=m;render()};
+window.doImport=async()=>{
+  const key=$('#impTable').value, f=$('#impFile').files[0];
+  if(!f) return;
+  const t=TABLES[key];
+  const text=await f.text();
+  const rows=parseCSV(text);
+  if(rows.length<2) return showReport(`<p class="bad">That file has no data rows.</p>`);
+  const head=rows[0].map(h=>h.trim().toLowerCase());
+  const missing=t.cols.filter(c=>!head.includes(c));
+  if(missing.length) return showReport(`<p class="bad">Wrong file for <b>${key.replace(/_/g,' ')}</b> — missing column${missing.length>1?'s':''}: ${missing.join(', ')}.</p>
+    <p style="margin-top:8px">Download the template above to see the expected header row.</p>`);
+  const ok=[],bad=[];
+  for(let i=1;i<rows.length;i++){
+    const obj={}; head.forEach((h,j)=>obj[h]=(rows[i][j]??'').trim());
+    const errs=[]; const rec=t.inn(obj,errs);
+    if(rec) ok.push(rec); else bad.push(`Row ${i+1}: ${errs.join('; ')}`);
+  }
+  if(ok.length===0) return showReport(`<p class="bad">Nothing imported — all ${bad.length} rows had problems.</p><ul>${bad.slice(0,20).map(b=>`<li>${esc(b)}</li>`).join('')}</ul>`);
+  const verb=importMode==='replace'?`Replace all ${D[t.store].length} existing rows with`:'Add';
+  if(!await confirmBox(`${verb} ${ok.length} valid row${ok.length===1?'':'s'}?${bad.length?` ${bad.length} row${bad.length===1?'':'s'} will be skipped.`:''}`,'Import','Cancel')) return;
+  if(importMode==='replace') await clearStore(t.store);
+  for(const rec of ok) await put(t.store,rec);
+  await reload(t.store);
+  render();   /* refresh counts first — render() rebuilds the pane, so report goes after */
+  showReport(`<p class="good">Imported ${ok.length} row${ok.length===1?'':'s'}.</p>${
+    bad.length?`<p class="bad" style="margin-top:8px">Skipped ${bad.length}:</p><ul>${bad.slice(0,20).map(b=>`<li>${esc(b)}</li>`).join('')}</ul>`
+    +(bad.length>20?`<p style="margin-top:6px">…and ${bad.length-20} more.</p>`:''):''}`);
+  $('#impFile').value='';
+};
+function showReport(html){ const el=$('#impReport'); if(el) el.innerHTML=`<div class="report">${html}</div>` }
+
+/* ---------- storage readout ---------- */
+function paneStorage(){
+  const sizes=STORES.filter(s=>!['messages','prizes'].includes(s)).map(s=>({s,n:D[s].length,b:new Blob([JSON.stringify(D[s])]).size}));
+  const media={text:0,drawing:0,photo:0,audio:0};
+  const sizeOfParts=m=>partsOf(m).reduce((a,p)=>a+((p.blob?.size)||new Blob([p.text||'']).size),0);
+  for(const m of D.messages) for(const p of partsOf(m)) media[p.kind]+=(p.blob?.size)||new Blob([p.text||'']).size;
+  const mediaTotal=Object.values(media).reduce((a,b)=>a+b,0);
+  const prizeBytes=D.prizes.reduce((a,p)=>a+sizeOfParts(p),0);
+  const faceBytes=D.members.reduce((a,m)=>a+(m.avatar?.size||0),0);
+  const total=sizes.reduce((a,x)=>a+x.b,0)+mediaTotal+prizeBytes+faceBytes;
+  setTimeout(async()=>{
+    if(!navigator.storage?.estimate) return;
+    const {usage,quota}=await navigator.storage.estimate();
+    const el=$('#quota'); if(!el)return;
+    const pct=quota?Math.min(100,usage/quota*100):0;
+    const persisted=await navigator.storage.persisted?.();
+    el.innerHTML=`<div class="kv"><span>Used by this app</span><b>${bytes(usage)}</b></div>
+      <div class="kv"><span>Space the browser allows</span><b>${bytes(quota)}</b></div>
+      <div class="bar"><i style="width:${pct.toFixed(1)}%"></i></div>
+      <p class="suggest">${persisted?'Storage is marked persistent — the system should not clear it to reclaim space.'
+        :'Storage is <b>not</b> marked persistent. The system could clear it if the tablet runs low on space. Export regularly.'}</p>`;
+  },30);
+  return `<section class="block card"><h3>Device storage</h3><div id="quota"><p class="suggest">Measuring…</p></div></section>
+    <section class="block card"><h3>What's stored here</h3>
+      ${sizes.filter(x=>x.n).map(x=>`<div class="kv"><span>${x.s} · ${x.n} row${x.n===1?'':'s'}</span><b>${bytes(x.b)}</b></div>`).join('')}
+      ${D.prizes.length?`<div class="kv"><span>prizes · ${D.prizes.length} queued</span><b>${bytes(prizeBytes)}</b></div>`:''}
+      ${faceBytes?`<div class="kv"><span>member photos · ${D.members.filter(m=>m.avatar).length}</span><b>${bytes(faceBytes)}</b></div>`:''}
+      ${D.library?.length?`<div class="kv"><span>food library · ${D.library.length} entries</span><b>${bytes(new Blob([JSON.stringify(D.library)]).size)}</b></div>`:''}
+      ${D.messages.length?`<div class="kv"><span>notes · ${D.messages.length} (${['photo','audio','drawing','text'].filter(k=>media[k]>0).map(k=>D.messages.flatMap(partsOf).filter(p=>p.kind===k).length+' '+k).join(', ')})</span><b>${bytes(mediaTotal)}</b></div>`:''}
+      <div class="kv"><span><b>Total data</b></span><b>${bytes(total)}</b></div>
+      <p class="suggest">Text records stay tiny — photos and voice notes are what fill a tablet. Delete old media notes from the board when this grows.</p>
+    </section>
+    <section class="block card"><h3>Erase everything</h3>
+      <p class="suggest" style="margin:0 0 10px">Deletes all data on this device. Export first — there is no undo and no copy anywhere else.</p>
+      <button class="btn danger" onclick="wipeAll()">Erase all data</button></section>`;
+}
+window.wipeAll=async()=>{
+  showSheet(`<h2>Erase everything?</h2>
+    <p class="sub">Every food item, chore, habit log, and name on this device will be gone. Type ERASE to confirm.</p>
+    <section class="block card"><input class="field" id="wipeWord" placeholder="ERASE"></section>
+    <div class="actions"><button class="btn danger" onclick="doWipe()">Erase all data</button>
+      <button class="btn ghost" onclick="closeSheet()">Cancel</button></div>`);
+};
+window.doWipe=async()=>{
+  if($('#wipeWord').value.trim().toUpperCase()!=='ERASE') return toast('Type ERASE to confirm');
+  for(const s of STORES) await clearStore(s);
+  await loadAll(); closeSheet(); habitMember=null; toast('All data erased'); render();
+};
+
+/* ---------- sheet & confirm ---------- */
+function showSheet(html){
+  closeSheet();
+  const scrim=document.createElement('div');
+  scrim.className='scrim';scrim.id='scrim';
+  scrim.innerHTML=`<div class="sheet">${html}</div>`;
+  scrim.addEventListener('click',e=>{if(e.target===scrim)closeSheet()});
+  document.body.appendChild(scrim);
+}
+window.closeSheet=()=>{const s=$('#scrim');if(s)s.remove()};
+function confirmBox(msgHtml,yes,no){
+  if(!HAS_DIALOG){  /* pre-2014 browsers: plain confirm keeps the app usable */
+    const plain=String(msgHtml).replace(/<[^>]*>/g,'');
+    return Promise.resolve(window.confirm(plain));
+  }
+  return new Promise(res=>{
+    const dlg=document.createElement('dialog');
+    dlg.className='confirm';
+    dlg.innerHTML=`<p>${msgHtml}</p><div class="actions">
+      <button class="btn primary" value="y">${yes}</button>
+      <button class="btn" value="n">${no}</button></div>`;
+    dlg.querySelectorAll('button').forEach(b=>b.onclick=()=>dlg.close(b.value));
+    dlg.onclose=()=>{res(dlg.returnValue==='y');dlg.remove()};
+    document.body.appendChild(dlg);dlg.showModal();
+  });
+}
+
+/* ===================== SYNC (Connected edition only) =====================
+   No supabase-js. It would have to come from a CDN, which invariant #1 forbids
+   and which would end the single-file property; it also persists its session in
+   localStorage, which invariant #2 forbids. This is ~100 lines of fetch against
+   PostgREST and GoTrue instead, with the session in IndexedDB.
+
+   Storage shape on the server is ONE generic table, adhq.records, holding
+   {store, uid, data jsonb, modified, deleted}. See supabase-adhq-schema.sql.
+   ======================================================================== */
+let syncState={phase:'idle',at:null,msg:''};   /* idle | working | ok | error | off */
+let syncSess=null;    /* synchronous mirror of the stored session — render() cannot await */
+const meta=async k=>(await getOne('sync',k))||null;
+const setMeta=(k,v)=>rawPut('sync',{k,...v});
+
+/* --- auth (GoTrue), session held in IndexedDB, never localStorage --- */
+async function session(){ return (syncSess=await meta('session')); }
+async function authFetch(path,opts={}){
+  const s=await session();
+  const h={apikey:SYNC.key,'Content-Type':'application/json',...(opts.headers||{})};
+  if(s?.access_token) h.Authorization='Bearer '+s.access_token;
+  let r=await fetch(SYNC.url+path,{...opts,headers:h});
+  if(r.status===401&&s?.refresh_token){        /* one silent refresh, then give up */
+    if(await refreshSession()) return authFetch(path,opts);
+  }
+  return r;
+}
+async function refreshSession(){
+  const s=await session(); if(!s?.refresh_token) return false;
+  const r=await fetch(`${SYNC.url}/auth/v1/token?grant_type=refresh_token`,{
+    method:'POST',headers:{apikey:SYNC.key,'Content-Type':'application/json'},
+    body:JSON.stringify({refresh_token:s.refresh_token})});
+  if(!r.ok){ await rawDel('sync','session'); return false; }
+  const j=await r.json();
+  await setMeta('session',{access_token:j.access_token,refresh_token:j.refresh_token,email:j.user?.email||s.email});
+  return true;
+}
+window.syncSignIn=async()=>{
+  const email=($('#syncEmail')?.value||'').trim(), pass=$('#syncPass')?.value||'';
+  if(!email||!pass) return toast('Enter the household email and password');
+  syncState={phase:'working',at:Date.now(),msg:'Signing in…'}; render();
+  try{
+    const r=await fetch(`${SYNC.url}/auth/v1/token?grant_type=password`,{
+      method:'POST',headers:{apikey:SYNC.key,'Content-Type':'application/json'},
+      body:JSON.stringify({email,password:pass})});
+    const j=await r.json();
+    if(!r.ok) throw new Error(j.error_description||j.msg||j.message||'Sign-in failed');
+    await setMeta('session',{access_token:j.access_token,refresh_token:j.refresh_token,email});
+    await session();
+    syncState={phase:'ok',at:Date.now(),msg:'Signed in'}; toast('Paired'); render();
+    await syncNow();
+  }catch(e){ syncState={phase:'error',at:Date.now(),msg:String(e.message||e)}; render(); }
+};
+window.syncSignOut=async()=>{
+  await rawDel('sync','session'); syncSess=null;
+  syncState={phase:'idle',at:null,msg:'Signed out'};
+  toast('This device is no longer paired'); render();
+};
+
+/* --- scrub: what actually goes over the wire --- */
+function scrub(store,rec){
+  const {id,_dirty,avatar,...rest}=rec;   /* id is device-local; avatar is a blob */
+  return rest;
+}
+const PROFILE=m=>m==='GET'?{'Accept-Profile':SYNC.schema}:{'Content-Profile':SYNC.schema};
+
+/* --- the sync pass: push dirty rows + tombstones, then pull deltas --- */
+let syncTimer=null;
+const syncSoon=()=>{ if(!SYNC.enabled) return;
+  clearTimeout(syncTimer); syncTimer=setTimeout(()=>syncNow(true),3000); };
+
+window.syncNow=async(quiet)=>{
+  if(!SYNC.enabled) return;
+  if(!(await session())){ if(!quiet) toast('Pair this device first'); return; }
+  if(syncState.phase==='working') return;
+  syncState={phase:'working',at:Date.now(),msg:'Syncing…'}; if(!quiet) render();
+  try{
+    await pushChanges();
+    let n=0,page;                      /* page until the server runs out */
+    do{ page=await pullChanges(); n+=page; } while(page>=1000);
+    syncState={phase:'ok',at:Date.now(),msg:n?`${n} change${n===1?'':'s'} in`:'Up to date'};
+    if(n) render(); else if(!quiet) render();
+  }catch(e){
+    syncState={phase:'error',at:Date.now(),msg:String(e.message||e)};
+    if(!quiet) render();
+  }
+};
+
+async function pushChanges(){
+  const rows=[];
+  for(const s of SYNC.stores)
+    for(const r of (D[s]||[]).filter(x=>x._dirty))
+      rows.push({store:s,uid:r.uid,data:scrub(s,r),modified:new Date(r.modified||Date.now()).toISOString(),deleted:false});
+  const tombs=(await getAll('sync')).filter(x=>x.k?.startsWith('tomb:')&&x._dirty);
+  for(const t of tombs)
+    rows.push({store:t.store,uid:t.uid,data:{},modified:new Date(t.at).toISOString(),deleted:true});
+  if(!rows.length) return 0;
+  const r=await authFetch(`/rest/v1/records?on_conflict=owner,store,uid`,{
+    method:'POST',
+    headers:{...PROFILE('POST'),Prefer:'resolution=merge-duplicates,return=minimal'},
+    body:JSON.stringify(rows)});
+  if(!r.ok) throw new Error(`push failed (${r.status}) ${await r.text()}`);
+  /* only clear the dirty flags the server actually accepted */
+  for(const s of SYNC.stores)
+    for(const rec of (D[s]||[]).filter(x=>x._dirty)){ delete rec._dirty; await rawPut(s,rec); }
+  for(const t of tombs){ delete t._dirty; await rawPut('sync',t); }
+  return rows.length;
+}
+
+async function pullChanges(){
+  const cur=(await meta('cursor'))?.at||'1970-01-01T00:00:00Z';
+  const r=await authFetch(`/rest/v1/records?select=store,uid,data,modified,deleted,synced_at`
+    +`&synced_at=gt.${encodeURIComponent(cur)}&order=synced_at.asc&limit=1000`,
+    {headers:PROFILE('GET')});
+  if(!r.ok) throw new Error(`pull failed (${r.status}) ${await r.text()}`);
+  const rows=await r.json();
+  if(!rows.length) return 0;
+  const touched=new Set();
+  for(const row of rows){
+    if(!SYNC.stores.includes(row.store)) continue;
+    const local=(D[row.store]||[]).find(x=>x.uid===row.uid);
+    const remoteAt=Date.parse(row.modified)||0;
+    if(local&&(local.modified||0)>remoteAt) continue;          /* local edit is newer — keep it */
+    if(row.deleted){ if(local){ await rawDel(row.store,local.id); touched.add(row.store); } continue; }
+    const merged={...row.data,uid:row.uid,modified:remoteAt};
+    if(local){
+      merged.id=local.id;
+      if(local.avatar) merged.avatar=local.avatar;             /* blobs are device-local; never clobbered */
+    }
+    await rawPut(row.store,merged); touched.add(row.store);
+  }
+  await setMeta('cursor',{at:rows[rows.length-1].synced_at});
+  if(touched.size) await reload(...touched);
+  return rows.length;
+}
+
+/* --- settings pane --- */
+function paneSync(){
+  if(!SYNC.enabled) return `<section class="block card"><h3>Sync</h3>
+    <p class="suggest">This is the <b>Local edition</b>. It has no accounts and makes no network
+    requests of any kind — not even to check for updates. Everything stays on this tablet.</p>
+    <p class="suggest">To use the Connected edition, set <code>SYNC.enabled</code> to
+    <code>true</code> at the top of the script and reload.</p></section>`;
+  const sess=syncSess;
+  const when=syncState.at?fmtDate(syncState.at)+' '+new Date(syncState.at).toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'}):'never';
+  const status=({idle:'Not synced yet',working:'Syncing…',ok:syncState.msg||'Up to date',error:'Problem: '+(syncState.msg||'unknown'),off:'Off'})[syncState.phase]||'Unknown';
+  return `<section class="block card"><h3>This device</h3>
+      ${sess?`<div class="kv"><span>Paired as</span><b>${esc(sess.email||'signed in')}</b></div>
+        <div class="kv"><span>Status</span><b>${esc(status)}</b></div>
+        <div class="kv"><span>Last attempt</span><b>${esc(when)}</b></div>
+        <div class="actions" style="margin-top:10px">
+          <button class="btn" onclick="syncNow()">Sync now</button>
+          <button class="btn ghost" onclick="syncSignOut()">Unpair this device</button></div>`
+      :`<p class="suggest">Sign in with the shared household account to pair this device.</p>
+        <input class="field" id="syncEmail" type="email" placeholder="household email" autocomplete="username">
+        <input class="field" id="syncPass" type="password" placeholder="password" autocomplete="current-password" style="margin-top:8px">
+        <div class="actions" style="margin-top:10px">
+          <button class="btn" onclick="syncSignIn()">Pair device</button></div>
+        ${syncState.phase==='error'?`<p class="suggest">${esc(syncState.msg)}</p>`:''}`}
+    </section>
+    <section class="block card"><h3>What syncs</h3>
+      <p class="suggest">Food, chores, chore history, habit logs, the shopping list, names and
+      the settings lists. <b>Nothing else.</b></p>
+      <p class="suggest">Photos, voice memos, drawings, member photos and prize contents are
+      never uploaded — in any edition. They live on this tablet only, and are still not in any
+      backup (TRANSFER.md §8).</p></section>`;
+}
+
+/* ---------- boot ---------- */
+document.querySelectorAll('nav.tabs button').forEach(b=>
+  b.addEventListener('click',()=>{tab=b.dataset.tab;draft=null;choreDraft=null;render()}));
+function tickClock(){
+  const n=new Date();
+  $('#clock .t').textContent=n.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'});
+  $('#clock .d').textContent=n.toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric'});
+}
+/* ---------- capability detection (old tablets are the point) ---------- */
+function flexGapOK(){
+  try{
+    const f=document.createElement('div');
+    f.style.cssText='display:flex;flex-direction:column;row-gap:10px;position:absolute;visibility:hidden';
+    f.appendChild(document.createElement('div')); f.appendChild(document.createElement('div'));
+    document.body.appendChild(f);
+    const ok=f.scrollHeight===10;
+    if(f.parentNode) f.parentNode.removeChild(f);
+    return ok;
+  }catch(e){ return true; }   /* if we cannot measure, assume modern and leave layout alone */
+}
+const HAS_DIALOG=typeof HTMLDialogElement!=='undefined'&&!!HTMLDialogElement.prototype.showModal;
+
+(async()=>{
+  if(!flexGapOK()) document.documentElement.classList.add('no-flexgap');
+  if(navigator.storage?.persist) navigator.storage.persist();
+  await openDB(); await loadAll();
+  if(SYNC.enabled){
+    await session();
+    /* on wake / tab focus, not on a timer — a fridge tablet left on for a week
+       should not make 20,000 pointless requests */
+    document.addEventListener('visibilitychange',()=>{ if(!document.hidden) syncNow(true); });
+    syncNow(true);
+  }
+  tickClock(); setInterval(tickClock,30000);
+  render();
+})();
+</script>
+</body>
+</html>
