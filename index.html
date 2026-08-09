@@ -63,6 +63,13 @@
     main{padding-top:14px}
     main.nosub{padding-top:58px}
   }
+  /* gate: no tabs, no clock — nothing to interact with until a household is chosen */
+  .gated nav.tabs,.gated header.top{display:none}
+  .gated #app{margin-left:auto;margin-right:auto;max-width:520px}
+  main.gate{padding-top:8vh;max-width:460px;margin:0 auto}
+  main.gate h2{font-size:30px;letter-spacing:-.02em;margin:0 0 6px}
+  main.gate .sub{color:var(--muted);margin:0 0 16px}
+  main.gate .bad{margin-top:10px}
   .needs{display:inline-block;margin-left:8px;padding:1px 7px;border-radius:999px;
     font-size:11px;font-weight:700;background:var(--panel-2);color:var(--muted);
     border:1px solid var(--line);vertical-align:middle}
@@ -489,10 +496,56 @@ const syncable=s=>SYNC.enabled&&SYNC.stores.includes(s);
 
 /* ---------- IndexedDB ---------- */
 const STORES=['items','categories','shopping','common','members','chores','choreTypes','choreHistory','habits','habitLogs','messages','stores','prizes','locations'];
-let db;
-function openDB(){
+let db, dbName='adhq';
+
+/* A SECOND, tiny database that holds only the session and the household->database
+   map. It has to be separate: the whole point is that signing in as a different
+   household must not be able to see, merge with, or overwrite the data of the
+   household already on this device. Keeping the session inside a household's own
+   database would make that impossible to reason about. */
+let cdb;
+function openControl(){
   return new Promise((res,rej)=>{
-    const rq=indexedDB.open('adhq',7);
+    const rq=indexedDB.open('adhq-control',1);
+    rq.onupgradeneeded=e=>{
+      const d=e.target.result;
+      if(!d.objectStoreNames.contains('ctl')) d.createObjectStore('ctl',{keyPath:'k'});
+    };
+    rq.onsuccess=e=>{cdb=e.target.result;res()};
+    rq.onerror=()=>rej(rq.error);
+  });
+}
+const ctlTx=(mode,fn)=>new Promise((res,rej)=>{
+  const t=cdb.transaction('ctl',mode),s=t.objectStore('ctl');
+  const out=fn(s);
+  t.oncomplete=()=>res(out&&out.result!==undefined?out.result:undefined);
+  t.onerror=()=>rej(t.error);
+});
+const ctlGet=k=>ctlTx('readonly',s=>s.get(k));
+const ctlPut=(k,v)=>ctlTx('readwrite',s=>s.put({k,...v}));
+const ctlDel=k=>ctlTx('readwrite',s=>s.delete(k));
+
+/* Each household gets its OWN IndexedDB. Switching accounts on a shared tablet
+   therefore cannot bleed data in either direction — and, just as importantly,
+   signing out never has to delete anything. That matters more than it sounds:
+   photos, voice memos, drawings and prize contents live only on the device and
+   still have no backup path (TRANSFER.md §8), so a sign-out that wiped local
+   storage would destroy the one copy that exists.
+   The first household to sign in on a device adopts the original `adhq`
+   database, so nothing already logged is stranded. */
+async function dbNameFor(uid){
+  if(!uid) return 'adhq';
+  const map=(await ctlGet('dbmap'))?.map||{};
+  if(map[uid]) return map[uid];
+  map[uid]=Object.values(map).includes('adhq')?`adhq-h-${uid}`:'adhq';
+  await ctlPut('dbmap',{map});
+  return map[uid];
+}
+
+function openDB(name){
+  dbName=name||dbName;
+  return new Promise((res,rej)=>{
+    const rq=indexedDB.open(dbName,7);
     rq.onupgradeneeded=e=>{
       const d=e.target.result;
       for(const s of STORES) if(!d.objectStoreNames.contains(s)) d.createObjectStore(s,{keyPath:'id',autoIncrement:true});
@@ -2422,8 +2475,8 @@ let syncSess=null;    /* synchronous mirror of the stored session — render() c
 const meta=async k=>(await getOne('sync',k))||null;
 const setMeta=(k,v)=>rawPut('sync',{k,...v});
 
-/* --- auth (GoTrue), session held in IndexedDB, never localStorage --- */
-async function session(){ return (syncSess=await meta('session')); }
+/* --- auth (GoTrue). Session in the CONTROL database, never localStorage --- */
+async function session(){ return (syncSess=(await ctlGet('session'))||null); }
 async function authFetch(path,opts={}){
   const s=await session();
   const h={apikey:SYNC.key,'Content-Type':'application/json',...(opts.headers||{})};
@@ -2439,31 +2492,48 @@ async function refreshSession(){
   const r=await fetch(`${SYNC.url}/auth/v1/token?grant_type=refresh_token`,{
     method:'POST',headers:{apikey:SYNC.key,'Content-Type':'application/json'},
     body:JSON.stringify({refresh_token:s.refresh_token})});
-  if(!r.ok){ await rawDel('sync','session'); return false; }
+  if(!r.ok){ await ctlDel('session'); syncSess=null; return false; }
   const j=await r.json();
-  await setMeta('session',{access_token:j.access_token,refresh_token:j.refresh_token,email:j.user?.email||s.email});
+  await ctlPut('session',{access_token:j.access_token,refresh_token:j.refresh_token,
+    email:j.user?.email||s.email,uid:j.user?.id||s.uid});
+  await session();
   return true;
 }
 window.syncSignIn=async()=>{
   const email=($('#syncEmail')?.value||'').trim(), pass=$('#syncPass')?.value||'';
-  if(!email||!pass) return toast('Enter the household email and password');
-  syncState={phase:'working',at:Date.now(),msg:'Signing in…'}; render();
+  if(!email||!pass) return gateError('Enter the household email and password');
+  syncState={phase:'working',at:Date.now(),msg:'Signing in…'};
+  gateBusy(true);
   try{
     const r=await fetch(`${SYNC.url}/auth/v1/token?grant_type=password`,{
       method:'POST',headers:{apikey:SYNC.key,'Content-Type':'application/json'},
       body:JSON.stringify({email,password:pass})});
     const j=await r.json();
     if(!r.ok) throw new Error(j.error_description||j.msg||j.message||'Sign-in failed');
-    await setMeta('session',{access_token:j.access_token,refresh_token:j.refresh_token,email});
+    await ctlPut('session',{access_token:j.access_token,refresh_token:j.refresh_token,
+      email,uid:j.user?.id||null});
     await session();
-    syncState={phase:'ok',at:Date.now(),msg:'Signed in'}; toast('Paired'); render();
-    await syncNow();
-  }catch(e){ syncState={phase:'error',at:Date.now(),msg:String(e.message||e)}; render(); }
+    syncState={phase:'ok',at:Date.now(),msg:'Signed in'};
+    await startHousehold();          /* opens THIS household's database */
+    toast('Signed in');
+    syncNow(true); libSync(true);
+  }catch(e){
+    syncState={phase:'error',at:Date.now(),msg:String(e.message||e)};
+    gateBusy(false); gateError(String(e.message||e));
+    if(!gated) render();
+  }
 };
+
 window.syncSignOut=async()=>{
-  await rawDel('sync','session'); syncSess=null;
+  if(!await confirmBox(
+    'Sign out of this household?<br><br>Everything on this tablet stays exactly where it is — '
+    +'food, chores, notes, photos and voice memos are not deleted. Signing back in picks them up again.',
+    'Sign out','Cancel')) return;
+  await ctlDel('session'); syncSess=null;
   syncState={phase:'idle',at:null,msg:'Signed out'};
-  toast('This device is no longer paired'); render();
+  if(db){ db.close(); db=null; }
+  for(const k of Object.keys(D)) if(Array.isArray(D[k])) D[k]=[];
+  showGate();
 };
 
 /* --- scrub: what actually goes over the wire --- */
@@ -2644,6 +2714,55 @@ window.libPublish=async()=>{
   }catch(e){ libState={phase:'error',msg:String(e.message||e)}; render(); }
 };
 
+/* ===================== HOUSEHOLD GATE =====================
+   Connected edition only. The gate asks "is a session stored on this device?",
+   NOT "can we reach the server?" — a fridge tablet has to open and work when the
+   wifi is down, which is the entire product thesis. Once signed in, the app runs
+   fully offline and syncs opportunistically.
+   ========================================================= */
+let gated=false;
+function gateError(msg){ const e=$('#gateErr'); if(e) e.innerHTML=msg?`<p class="bad">${esc(msg)}</p>`:''; }
+function gateBusy(on){
+  const b=$('#gateGo'); if(!b) return;
+  b.disabled=!!on; b.textContent=on?'Signing in…':'Sign in';
+}
+function viewGate(){
+  return `<section class="block card gatecard">
+      <h2>ADHQ</h2>
+      <p class="sub">Sign in with your household account. One account per household —
+      every device in the house uses the same one.</p>
+      <div class="stack">
+        <input class="field" id="syncEmail" type="email" placeholder="household email"
+          autocomplete="username" onkeydown="if(event.key==='Enter')$('#syncPass').focus()">
+        <input class="field" id="syncPass" type="password" placeholder="password"
+          autocomplete="current-password" onkeydown="if(event.key==='Enter')syncSignIn()">
+        <button class="btn primary" id="gateGo" onclick="syncSignIn()">Sign in</button>
+      </div>
+      <div id="gateErr"></div>
+      <p class="suggest" style="margin-top:14px">Each household gets its own storage on this
+      device. Signing in as a different household never mixes with, or overwrites, what is
+      already here.</p>
+      <p class="suggest">Photos, voice memos, drawings and prize contents stay on this device
+      in every case — they are never uploaded.</p>
+    </section>`;
+}
+function showGate(){
+  gated=true;
+  document.documentElement.classList.add('gated');
+  $('#main').className='gate'; $('#main').innerHTML=viewGate();
+  const e=$('#syncEmail'); if(e) e.focus();
+}
+/* open the signed-in household's own database and start the app proper */
+async function startHousehold(){
+  const s=await session();
+  await openDB(await dbNameFor(s?.uid));
+  await loadAll();
+  gated=false;
+  document.documentElement.classList.remove('gated');
+  $('#main').className='';
+  render();
+}
+
 /* --- settings pane --- */
 function paneSync(){
   if(!SYNC.enabled) return `<section class="block card"><h3>Sync</h3>
@@ -2660,13 +2779,10 @@ function paneSync(){
         <div class="kv"><span>Last attempt</span><b>${esc(when)}</b></div>
         <div class="actions" style="margin-top:10px">
           <button class="btn" onclick="syncNow()">Sync now</button>
-          <button class="btn ghost" onclick="syncSignOut()">Unpair this device</button></div>`
-      :`<p class="suggest">Sign in with the shared household account to pair this device.</p>
-        <input class="field" id="syncEmail" type="email" placeholder="household email" autocomplete="username">
-        <input class="field" id="syncPass" type="password" placeholder="password" autocomplete="current-password" style="margin-top:8px">
-        <div class="actions" style="margin-top:10px">
-          <button class="btn" onclick="syncSignIn()">Pair device</button></div>
-        ${syncState.phase==='error'?`<p class="suggest">${esc(syncState.msg)}</p>`:''}`}
+          <button class="btn ghost" onclick="syncSignOut()">Sign out</button></div>
+        <p class="suggest">Signing out leaves everything on this tablet untouched — it only
+        forgets the account. Nothing is deleted, and nothing is uploaded on the way out.</p>`
+      :`<p class="suggest">This device is signed out. Reload the app to sign in again.</p>`}
     </section>
     <section class="block card"><h3>What syncs</h3>
       <p class="suggest">Food, chores, chore history, habit logs, the shopping list, names and
@@ -2701,16 +2817,19 @@ const HAS_DIALOG=typeof HTMLDialogElement!=='undefined'&&!!HTMLDialogElement.pro
 (async()=>{
   if(!flexGapOK()) document.documentElement.classList.add('no-flexgap');
   if(navigator.storage?.persist) navigator.storage.persist();
-  await openDB(); await loadAll();
+  await openControl();
+  tickClock(); setInterval(tickClock,30000);
   if(SYNC.enabled){
-    await session();
     /* on wake / tab focus, not on a timer — a fridge tablet left on for a week
        should not make 20,000 pointless requests */
-    document.addEventListener('visibilitychange',()=>{ if(!document.hidden) syncNow(true); });
-    syncNow(true);
-    libSync(true);
+    document.addEventListener('visibilitychange',()=>{ if(!document.hidden&&!gated) syncNow(true); });
+    const s=await session();
+    if(!s) return showGate();        /* no session stored: gate. No network needed to decide. */
+    await startHousehold();
+    syncNow(true); libSync(true);
+    return;
   }
-  tickClock(); setInterval(tickClock,30000);
+  await openDB('adhq'); await loadAll();
   render();
 })();
 </script>
