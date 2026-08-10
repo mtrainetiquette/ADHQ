@@ -70,6 +70,37 @@
   main.gate h2{font-size:30px;letter-spacing:-.02em;margin:0 0 6px}
   main.gate .sub{color:var(--muted);margin:0 0 16px}
   main.gate .bad{margin-top:10px}
+  /* filter stack: one plain question per row, so the chips are self-explaining */
+  .filterrow{margin-bottom:2px}
+  .filterrow .flabel{display:block;font-size:12px;font-weight:700;color:var(--muted);
+    letter-spacing:.02em;padding:0 4px 2px}
+  .filterrow .subbar{padding:2px 4px 8px}
+  .filterrow:empty{display:none}
+
+  /* bulk edit: collapsed to one line until asked for */
+  .bulk{margin:2px 0 10px}
+  .bulkhead{width:100%;text-align:left;background:var(--panel);border:1px solid var(--line);
+    border-radius:12px;padding:12px 14px;font-weight:700;color:var(--text);min-height:48px;cursor:pointer}
+  .bulk.open .bulkhead{border-bottom-left-radius:0;border-bottom-right-radius:0}
+  .bulkhead .caret{float:right;color:var(--muted)}
+  .bulkbody{border:1px solid var(--line);border-top:0;border-radius:0 0 12px 12px;
+    background:var(--panel-2);padding:12px 14px}
+  .selcount{align-self:center;font-weight:700;color:var(--muted);font-size:13px}
+  .pick{flex:none;width:38px;height:38px;border-radius:10px;border:2px solid var(--line);
+    display:flex;align-items:center;justify-content:center;font-weight:800;font-size:20px}
+  .pick.on{background:var(--accent);border-color:var(--accent);color:#1a1a1a}
+  .itemcard.picked{outline:2px solid var(--accent);outline-offset:-2px}
+
+  /* menu: six destinations at a size you can hit while holding a toddler */
+  .menugrid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;padding:4px 0}
+  @media (max-width:640px){.menugrid{grid-template-columns:repeat(2,1fr)}}
+  .menutile{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;
+    min-height:150px;padding:18px 10px;border-radius:16px;border:1px solid var(--line);
+    background:var(--panel);color:var(--text);cursor:pointer}
+  .menutile:active{background:var(--panel-2)}
+  .menutile .mico{font-size:44px;line-height:1}
+  .menutile .mlabel{font-size:19px;font-weight:800}
+  .menutile .msub{font-size:13px;color:var(--muted);font-weight:600;text-align:center}
   .needs{display:inline-block;margin-left:8px;padding:1px 7px;border-radius:999px;
     font-size:11px;font-weight:700;background:var(--panel-2);color:var(--muted);
     border:1px solid var(--line);vertical-align:middle}
@@ -269,9 +300,16 @@
   .no-flexgap .note .head>*+*,.no-flexgap .rec>*+*,.no-flexgap .goal>*+*{margin-left:10px}
   .no-flexgap .storehead>*+*{margin-left:8px}
   .toast{position:fixed;left:calc(50% + 44px);bottom:24px;transform:translateX(-50%);z-index:40;
-    background:var(--panel-2);border:1px solid var(--line);border-radius:12px;padding:12px 18px;
-    font-weight:700;opacity:0;transition:opacity .2s;pointer-events:none;max-width:calc(90% - 88px);text-align:center}
-  .toast.show{opacity:1}
+    background:var(--panel-2);border:1px solid var(--line);border-radius:14px;padding:14px 10px 14px 20px;
+    font-weight:700;opacity:0;transition:opacity .2s;pointer-events:none;max-width:calc(92% - 88px);
+    display:flex;align-items:center;gap:14px;text-align:left;box-shadow:0 6px 22px var(--shadow-ink)}
+  .toast.show{opacity:1;pointer-events:auto}
+  .toast .tmsg{flex:1;min-width:0}
+  /* 48px square: a fingertip target, not a decorative dismiss */
+  .toast .tx{flex:none;width:48px;height:48px;border-radius:12px;border:1px solid var(--line);
+    background:var(--panel);color:var(--text);font-size:24px;font-weight:800;line-height:1;
+    display:flex;align-items:center;justify-content:center;cursor:pointer}
+  .toast .tx:active{background:var(--panel-2)}
   @media (prefers-reduced-motion:reduce){.toast{transition:none}}
 </style>
 </head>
@@ -282,7 +320,8 @@
   </header>
   <main id="main"></main>
   <nav class="tabs" aria-label="Main sections"><div class="row">
-    <button data-tab="food" class="on"><span class="ico" aria-hidden="true">🥘</span>Food<span class="n" id="nFood" aria-hidden="true">0</span><span class="sr" id="nFoodSR"></span></button>
+    <button data-tab="menu" class="on"><span class="ico" aria-hidden="true">🏠</span>Menu</button>
+    <button data-tab="food"><span class="ico" aria-hidden="true">🥘</span>Food<span class="n" id="nFood" aria-hidden="true">0</span><span class="sr" id="nFoodSR"></span></button>
     <button data-tab="chores"><span class="ico" aria-hidden="true">🪴</span>Chores<span class="n" id="nChores" aria-hidden="true">0</span><span class="sr" id="nChoresSR"></span></button>
     <button data-tab="habits"><span class="ico" aria-hidden="true">📈</span>Habits</button>
     <button data-tab="shop"><span class="ico" aria-hidden="true">💰</span>Shop<span class="n" id="nShop" aria-hidden="true">0</span><span class="sr" id="nShopSR"></span></button>
@@ -469,9 +508,18 @@ const DEFAULT_COMMON=['Milk','Eggs','Leftovers (general)','Chicken (raw)','Chick
 const DEFAULT_CHORE_TYPES=['Health','Garbage','Paperwork','Food','Shopping','Cleaning','Outdoors','Pets'];
 const DEFAULT_HABITS=['Vitamins','Exercise','Reading','Water','Instrument','Outside time'];
 const DEFAULT_STORES=['Grocery Store','Costco','Online','Swap','Asian Grocery Store','Monger'];
+const DEFAULT_AREAS=['Kitchen','Bathroom','Bedrooms','Living room','Laundry','Outside','Whole house'];
+/* "How much time do you have?" — the buckets people actually think in. `minutes`
+   is the estimate for the NEXT step of a chore, not the whole project. */
+const TIMEBUCKETS=[
+  ['quick','10–60 minutes',10,60],
+  ['half','1–2 hours',61,120],
+  ['long','2+ hours',121,Infinity],
+];
+const timeBucket=m=>!(+m>0)?null:(TIMEBUCKETS.find(([,,lo,hi])=>m>=lo&&m<=hi)||TIMEBUCKETS[0])[0];
 const STREAK_GOAL=7;  /* days in a row that earn one prize from the queue */
 const RECURRENCES=[['none','One-off'],['daily','Daily'],['weekly','Weekly'],['monthly','Monthly'],['custom','Every N days']];
-const CAP={cats:50,choreTypes:50,habits:50,members:10,stores:50,locations:24};
+const CAP={cats:50,choreTypes:50,habits:50,members:10,stores:50,locations:24,areas:30};
 const REV_LABEL={usda:'USDA-reviewed',owner:'Owner-added',unrev:'Unreviewed'};
 const SERIES=['#f5c84c','#5fd08a','#6fb3e8','#b98ae0','#f0a35e','#e8646a','#7fd9cf','#c9d05f','#e089b8','#8fa6f0'];
 
@@ -490,12 +538,12 @@ const SYNC={
      the device in either edition. `members` syncs the name only — the
      avatar blob is stripped on the way out (see scrub()). */
   stores:['items','categories','shopping','common','members','chores',
-          'choreTypes','choreHistory','habits','habitLogs','stores','locations'],
+          'choreTypes','choreHistory','habits','habitLogs','stores','locations','areas'],
 };
 const syncable=s=>SYNC.enabled&&SYNC.stores.includes(s);
 
 /* ---------- IndexedDB ---------- */
-const STORES=['items','categories','shopping','common','members','chores','choreTypes','choreHistory','habits','habitLogs','messages','stores','prizes','locations'];
+const STORES=['items','categories','shopping','common','members','chores','choreTypes','choreHistory','habits','habitLogs','messages','stores','prizes','locations','areas'];
 let db, dbName='adhq';
 
 /* A SECOND, tiny database that holds only the session and the household->database
@@ -596,10 +644,12 @@ async function del(s,k){
 }
 
 /* ---------- state ---------- */
-const D={items:[],categories:[],shopping:[],common:[],members:[],chores:[],choreTypes:[],choreHistory:[],habits:[],habitLogs:[],locations:[]};
-let tab='food', foodSub='list', sortMode='soonest', draft=null, foodSearch='';
+const D={items:[],categories:[],shopping:[],common:[],members:[],chores:[],choreTypes:[],choreHistory:[],habits:[],habitLogs:[],locations:[],areas:[]};
+let tab='menu', foodSub='list', sortMode='soonest', draft=null, foodSearch='';
 let choreFilterType=null, choreFilterWho=null, choreDraft=null;
 let batch=null, foodGapsOnly=false, choreGapsOnly=false;
+let choreFilterTime=null, choreFilterArea=null, choreFilterDue=null, choreFilterPri=false;
+let choreSel=new Set(), bulkOpen=false;
 let habitMember=null, habitGraphMode='habit', habitDate=null;
 let settingsPane='members';
 
@@ -612,6 +662,7 @@ async function loadAll(){
   await seed('choreTypes',DEFAULT_CHORE_TYPES);
   await seed('habits',DEFAULT_HABITS);
   await seed('stores',DEFAULT_STORES);
+  await seed('areas',DEFAULT_AREAS);
   if(D.locations.length===0){ for(const l of DEFAULT_LOCATIONS) await put('locations',{...l}); D.locations=await getAll('locations'); }
   await migrateStorage();
   await migrateUids();
@@ -729,7 +780,19 @@ function advance(iso,rec,interval,from){
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const q=s=>JSON.stringify(String(s)).replace(/"/g,'&quot;');
-function toast(msg){const t=$('#toast');t.textContent=msg;t.classList.add('show');clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove('show'),1900)}
+/* 1.9s was not long enough to read "7 rows added, 2 need details" — let alone
+   act on it. Now it holds for 9s, or indefinitely for anything reporting a
+   count or a problem, and always has a real dismiss button. */
+function toast(msg,opts){
+  const t=$('#toast'); if(!t) return;
+  const sticky=opts?.sticky ?? /\d/.test(String(msg));
+  t.innerHTML=`<span class="tmsg"></span><button class="tx" onclick="hideToast()" aria-label="Dismiss">×</button>`;
+  t.querySelector('.tmsg').textContent=msg;
+  t.classList.add('show');
+  clearTimeout(t._h);
+  if(!sticky) t._h=setTimeout(hideToast,9000);
+}
+window.hideToast=()=>{const t=$('#toast'); if(t){clearTimeout(t._h); t.classList.remove('show');}};
 const mediaURLs=new Map();
 const bytes=n=>n<1024?n+' B':n<1048576?(n/1024).toFixed(0)+' KB':(n/1048576).toFixed(1)+' MB';
 
@@ -773,7 +836,8 @@ function render(){
   $('#nNotes').textContent=D.messages.length;
   $('#nNotes').classList.toggle('zero',D.messages.length===0);
   m.classList.remove('nosub');
-  m.innerHTML = tab==='food'?viewFood()
+  m.innerHTML = tab==='menu'?viewMenu()
+    : tab==='food'?viewFood()
     : tab==='chores'?viewChores()
     : tab==='habits'?viewHabits()
     : tab==='shop'?viewShop()
@@ -791,7 +855,7 @@ function render(){
 /* Derived, never stored — same reasoning as prize milestones (TRANSFER.md §4).
    Filling a blank in makes the tag disappear on its own. */
 const itemGaps=it=>[!it.category&&'category',!it.location&&'place',!it.eatBy&&'eat-by'].filter(Boolean);
-const choreGaps=c=>[!c.type&&'type',!c.dueBy&&'due date',!(c.assignees||[]).length&&'who'].filter(Boolean);
+const choreGaps=c=>[!c.type&&'type',!c.dueBy&&'due date',!(c.assignees||[]).length&&'who',!(+c.minutes>0)&&'time estimate'].filter(Boolean);
 const gapTag=g=>g.length?`<span class="needs">needs details</span>`:'';
 function itemCard(it){
   const meta=[it.category,it.location,it.container,it.eatBy?'eat by '+fmtDate(it.eatBy+'T12:00:00'):null].filter(Boolean).join(' · ');
@@ -984,19 +1048,118 @@ window.saveDraft=async()=>{
 function choreCard(c){
   const d=daysUntil(c.dueBy);
   const who=(c.assignees||[]).join(', ');
-  const meta=[c.type,c.dueBy?'due '+fmtDate(c.dueBy+'T12:00:00'):'no due date',
+  const meta=[c.type,c.area,c.minutes>0?minsLabel(c.minutes):null,
+    c.dueBy?'due '+fmtDate(c.dueBy+'T12:00:00'):'no due date',
     c.recurrence&&c.recurrence!=='none'?recurLabel(c):null].filter(Boolean).join(' · ');
   const flags=[
     c.priority?'<span class="flag pri">Priority</span>':'',
     c.needsHelp?'<span class="flag help">Needs help</span>':'',
     who?`<span class="flag who">${esc(who)}</span>`:''].join('');
-  return `<button class="itemcard card" onclick="openChore(${c.id})">
-    ${dayChip(d)}
-    <span class="iteminfo"><span class="nm">${esc(c.title)}</span>
+  const picking=bulkOpen;
+  const box=picking?`<span class="pick ${choreSel.has(c.id)?'on':''}" aria-hidden="true">${choreSel.has(c.id)?'✓':''}</span>`:'';
+  return `<button class="itemcard card ${picking&&choreSel.has(c.id)?'picked':''}"
+    onclick="${picking?`toggleChoreSel(${c.id})`:`openChore(${c.id})`}"
+    ${picking?`aria-pressed="${choreSel.has(c.id)}"`:''}>
+    ${picking?box:dayChip(d)}
+    <span class="iteminfo"><span class="nm">${esc(c.title)}${gapTag(choreGaps(c))}</span>
       <span class="meta">${esc(meta)}</span>
       ${flags?`<span class="flags">${flags}</span>`:''}</span>
   </button>`;
 }
+const minsLabel=m=>m>=120?`${(m/60).toFixed(m%60?1:0)} hr`:m>=60?`${(m/60).toFixed(m%60?1:0)} hr`:`${m} min`;
+
+/* ===================== MENU =====================
+   A tablet on a fridge is used standing up, often by someone holding something
+   else. The rail tabs are small; this is the same six destinations at a size you
+   can hit without looking. It is the default landing view.
+   =============================================== */
+const MENU=[
+  ['food','🥘','Food',      ()=>`${D.items.length} logged`],
+  ['chores','🪴','Chores',  ()=>{const n=D.chores.filter(c=>(daysUntil(c.dueBy)??99)<=0).length;
+                                 return n?`${n} due now`:'nothing due'}],
+  ['habits','📈','Habits',  ()=>`${D.habits.length} tracked`],
+  ['shop','💰','Shop',      ()=>`${D.shopping.filter(s=>!s.done).length} to buy`],
+  ['notes','💬','Notes',    ()=>`${D.messages.length} on the board`],
+  ['settings','⚙️','Setup', ()=>'names, lists, backup'],
+];
+function viewMenu(){
+  return `<div class="menugrid">${MENU.map(([t,ico,label,sub])=>
+    `<button class="menutile" onclick="goTab('${t}')">
+       <span class="mico" aria-hidden="true">${ico}</span>
+       <span class="mlabel">${label}</span>
+       <span class="msub">${esc(sub())}</span>
+     </button>`).join('')}</div>`;
+}
+window.goTab=t=>{tab=t;draft=null;choreDraft=null;batch=null;render()};
+
+/* ===================== BULK EDIT =====================
+   Collapsed by default. Multi-select turns every card into a checkbox, which is
+   a big visual change, so it stays behind one summary line until asked for. The
+   actions deliberately only SET fields — there is no bulk delete, because the
+   existing rule is that removing a category or a name never removes records, and
+   a mis-tapped "delete 40 chores" has no undo.
+   ==================================================== */
+function bulkBar(list){
+  const n=choreSel.size;
+  if(!bulkOpen) return `<div class="bulk"><button class="bulkhead" onclick="toggleBulk()"
+    aria-expanded="false">Edit several at once <span class="caret">▾</span></button></div>`;
+  const sel=D.chores.filter(c=>choreSel.has(c.id));
+  return `<div class="bulk open">
+    <button class="bulkhead" onclick="toggleBulk()" aria-expanded="true">Edit several at once <span class="caret">▴</span></button>
+    <div class="bulkbody">
+      <div class="chiprow">
+        <button class="chip" onclick="selAll()">Select all ${list.length} shown</button>
+        <button class="chip" onclick="selNone()">Clear selection</button>
+        <span class="selcount">${n} selected</span>
+      </div>
+      ${n?`
+      <div class="micro" style="margin:12px 0 6px">Set a due date</div>
+      <div class="chiprow">
+        <button class="chip" onclick="bulkDue('today')">Today</button>
+        <button class="chip" onclick="bulkDue('tomorrow')">Tomorrow</button>
+        <button class="chip" onclick="bulkDue('week')">In a week</button>
+        <button class="chip" onclick="bulkDue('clear')">Remove due date</button></div>
+      <div class="micro" style="margin:12px 0 6px">Roughly how long does the next step take?</div>
+      <div class="chiprow">${[10,20,30,45,60,90,120,180].map(m=>
+        `<button class="chip" onclick="bulkMins(${m})">${minsLabel(m)}</button>`).join('')}
+        <button class="chip" onclick="bulkMins(0)">Unknown</button></div>
+      ${D.areas.length?`<div class="micro" style="margin:12px 0 6px">Part of the house</div>
+      <div class="chiprow">${D.areas.map(a=>
+        `<button class="chip" onclick="bulkArea(${q(a.name)})">${esc(a.name)}</button>`).join('')}</div>`:''}
+      ${D.choreTypes.length?`<div class="micro" style="margin:12px 0 6px">Type</div>
+      <div class="chiprow">${D.choreTypes.map(t=>
+        `<button class="chip" onclick="bulkType(${q(t.name)})">${esc(t.name)}</button>`).join('')}</div>`:''}
+      ${D.members.length?`<div class="micro" style="margin:12px 0 6px">Assign to</div>
+      <div class="chiprow">${D.members.map(m=>
+        `<button class="chip" onclick="bulkWho(${q(m.name)})">${esc(m.name)}</button>`).join('')}
+        <button class="chip" onclick="bulkWho(null)">Nobody</button></div>`:''}
+      <div class="chiprow" style="margin-top:12px">
+        <button class="chip" onclick="bulkPri(true)">Mark priority</button>
+        <button class="chip" onclick="bulkPri(false)">Remove priority</button></div>
+      <p class="suggest" style="margin-top:10px">Applies to the ${n} selected chore${n===1?'':'s'} only.
+      ${sel.some(c=>c.recurrence&&c.recurrence!=='none')?'Some of these repeat — changing the due date moves the next occurrence, not the pattern.':''}</p>`
+      :`<p class="suggest" style="margin-top:10px">Tap chores to select them, then choose what to change.</p>`}
+    </div></div>`;
+}
+window.toggleBulk=()=>{bulkOpen=!bulkOpen; if(!bulkOpen) choreSel.clear(); render()};
+window.toggleChoreSel=id=>{choreSel.has(id)?choreSel.delete(id):choreSel.add(id);render()};
+window.selAll=()=>{for(const c of D.chores.filter(choreMatches)) choreSel.add(c.id);render()};
+window.selNone=()=>{choreSel.clear();render()};
+async function bulkApply(fn,label){
+  const sel=D.chores.filter(c=>choreSel.has(c.id));
+  if(!sel.length) return toast('Nothing selected');
+  for(const c of sel){ fn(c); c.modified=Date.now(); await put('chores',c); }
+  await reload('chores'); render();
+  toast(`${sel.length} chore${sel.length===1?'':'s'} updated — ${label}`);
+}
+window.bulkDue=w=>bulkApply(c=>{
+  c.dueBy=w==='clear'?'':w==='today'?todayISO():w==='tomorrow'?isoPlus(1):isoPlus(7);
+}, w==='clear'?'due date removed':'due date set');
+window.bulkMins=m=>bulkApply(c=>{c.minutes=m>0?m:null}, m>0?`about ${minsLabel(m)}`:'time estimate cleared');
+window.bulkArea=a=>bulkApply(c=>{c.area=a}, `moved to ${a}`);
+window.bulkType=t=>bulkApply(c=>{c.type=t}, `type set to ${t}`);
+window.bulkWho=n=>bulkApply(c=>{c.assignees=n?[n]:[]}, n?`assigned to ${n}`:'unassigned');
+window.bulkPri=v=>bulkApply(c=>{c.priority=!!v}, v?'marked priority':'priority removed');
 /* ===================== BATCH ADD =====================
    Walking round the house saying "sheets need washing every two weeks, that's
    linen maintenance". One line per thing. Only the name is required.
@@ -1052,6 +1215,14 @@ function batchRecur(tok){
   const r=parseRecurrence(s);
   return r&&r.recurrence==='none'&&!/^(once|one off|one time|onetime|single|never|no repeat)$/.test(s.replace(/[_-]+/g,' '))?null:r;
 }
+/* "20 min", "1.5 hours", "90m" -> minutes. Deliberately requires a unit, so a
+   bare number stays a possible date or interval rather than being guessed at. */
+function batchMinutes(tok){
+  const m=String(tok??'').trim().toLowerCase().match(/^(\d+(?:\.\d+)?)\s*(m|min|mins|minute|minutes|h|hr|hrs|hour|hours)$/);
+  if(!m) return null;
+  const n=parseFloat(m[1]); if(!(n>0)) return null;
+  return Math.round(/^h/.test(m[2])?n*60:n);
+}
 function batchLocation(tok){
   const hit=ciFind(LOCS(),tok); if(hit) return hit.name;
   const s=tok.toLowerCase();
@@ -1073,6 +1244,8 @@ function batchParse(kind,text){
         const con=ciFind(CONTAINERS,t);   if(con&&!r.container){r.container=con;continue}
         const d=batchDate(t);             if(d&&!r.eatBy){r.eatBy=d;continue}
       }else{
+        const mins=batchMinutes(t);       if(mins&&!r.minutes){r.minutes=mins;continue}
+        const ar=ciFind(D.areas,t);       if(ar&&!r.area){r.area=ar.name;continue}
         const rec=batchRecur(t);          if(rec&&!r.recurrence){Object.assign(r,rec);continue}
         const who=ciFind(D.members,t);    if(who){(r.assignees??=[]).push(who.name);continue}
         const ty=ciFind(D.choreTypes,t);  if(ty&&!r.type){r.type=ty.name;continue}
@@ -1091,7 +1264,7 @@ function batchParse(kind,text){
 }
 const batchGaps=(kind,r)=>kind==='food'
   ? ['category','location','eat-by'].filter((_,i)=>![r.category,r.location,r.eatBy][i])
-  : ['type','repeat','due date','who'].filter((_,i)=>![r.type,r.recurrence,r.dueBy,r.assignees?.length][i]);
+  : ['type','repeat','due date','who','time'].filter((_,i)=>![r.type,r.recurrence,r.dueBy,r.assignees?.length,r.minutes][i]);
 
 window.openBatch=k=>{batch={kind:k,text:'',parsed:null,makeVocab:true};draft=null;choreDraft=null;
   if(k==='food') foodSub='batch'; render()};
@@ -1138,7 +1311,7 @@ window.batchCommit=async()=>{
       await put('items',{name:r.name,location:r.location||null,container:r.container||null,
         category:r.category||proposed||null,libId:null,eatBy:r.eatBy||null,created:now,modified:now});
     }else{
-      await put('chores',{title:r.name,type:r.type||proposed||null,
+      await put('chores',{title:r.name,type:r.type||proposed||null,area:r.area||null,minutes:r.minutes||null,
         recurrence:r.recurrence||'none',interval:r.interval||7,checkIn:'',dueBy:r.dueBy||'',
         assignees:r.assignees||[],priority:!!r.priority,needsHelp:false,
         notes:r.notes||'',created:now,modified:now});
@@ -1159,7 +1332,7 @@ function viewBatch(){
   if(!batch.parsed){
     const eg=food
       ? `Milk, fridge door, Dairy, 5 days\nSourdough, counter\nFrozen peas, freezer, Produce`
-      : `Wash sheets, every two weeks, linen maintenance\nBins out, weekly, Alex\nDescale kettle`;
+      : `Wash sheets, every two weeks, 45 min, Bedrooms\nBins out, weekly, 10 min, Alex\nDescale kettle`;
     return back+`<section class="block card"><h3>One per line</h3>
       <p class="suggest">Start with the name. After that add anything you know —
       ${food?'a place, a category, how long it keeps':'how often, who does it, when it is due'} —
@@ -1172,7 +1345,7 @@ function viewBatch(){
       <section class="block card"><h3>What it understands</h3>
       <p class="suggest">${food
         ? 'Places (fridge, freezer, pantry, counter, cabinet, basement, crisper, door) · your categories · containers · "5 days", "2 weeks", or a date like 2026-08-20.'
-        : '"every two weeks", "weekly", "fortnightly", "every 3 days" · household names · your chore types · "3 days" or 2026-08-20 for a due date · the word "priority".'}</p>
+        : '"every two weeks", "weekly", "fortnightly", "every 3 days" · household names · your chore types · parts of the house · "20 min" or "2 hours" · "3 days" or 2026-08-20 for a due date · the word "priority".'}</p>
       <p class="suggest">Anything else is treated as a ${food?'category':'chore type'} you have not made yet,
       and you will be asked before it is created. Nothing is written until you confirm.</p></section>`;
   }
@@ -1180,7 +1353,8 @@ function viewBatch(){
   const rows=batch.parsed.map(r=>{
     const bits=food
       ? [r.category,r.location,r.container,r.eatBy?'eat by '+r.eatBy:null]
-      : [r.type,r.recurrence?recurLabel({recurrence:r.recurrence,interval:r.interval}):null,
+      : [r.type,r.area,r.minutes?minsLabel(r.minutes):null,
+         r.recurrence?recurLabel({recurrence:r.recurrence,interval:r.interval}):null,
          r.dueBy?'due '+r.dueBy:null,(r.assignees||[]).join(' & ')||null,r.priority?'priority':null];
     const known=bits.filter(Boolean).map(b=>`<span class="chip sm">${esc(b)}</span>`).join('');
     const prop=r.propose?`<span class="chip sm new">${esc(r.propose)} — new ${food?'category':'type'}</span>`:'';
@@ -1219,27 +1393,70 @@ function viewChores(){
   const types=[...new Set(D.chores.map(c=>c.type).filter(Boolean))];
   const whos=[...new Set(D.chores.flatMap(c=>c.assignees||[]))];
   const nGap=D.chores.filter(c=>choreGaps(c).length).length;
-  const filters=`<div class="subbar">
-    ${nGap?`<button class="chip ${choreGapsOnly?'on':''}" onclick="toggleChoreGaps()">Needs details · ${nGap}</button>`:''}
-    ${types.map(t=>`<button class="chip ${choreFilterType===t?'on':''}" onclick="filterType(${q(t)})">${esc(t)}</button>`).join('')}
-    ${whos.map(w=>`<button class="chip ${choreFilterWho===w?'on':''} ${memberByName(w)?.avatar?'hasface':''}" onclick="filterWho(${q(w)})">${memberFace(w,true)}</button>`).join('')}
-    ${(choreFilterType||choreFilterWho||choreGapsOnly)?`<button class="chip" onclick="clearFilters()">Clear</button>`:''}
-  </div>`;
-  let list=D.chores.filter(c=>(!choreFilterType||c.type===choreFilterType)&&(!choreFilterWho||(c.assignees||[]).includes(choreFilterWho))
-    &&(!choreGapsOnly||choreGaps(c).length));
+  const areas=D.areas.map(a=>a.name).filter(a=>D.chores.some(c=>c.area===a));
+  /* Four short rows, each asking a plain question, rather than one long strip of
+     unlabelled chips. The order is the order people actually decide in: time
+     first, because that is the real constraint on a Saturday morning. */
+  const row=(label,chips)=>chips?`<div class="filterrow"><span class="flabel">${label}</span>
+    <div class="subbar">${chips}</div></div>`:'';
+  const filters=
+    row("How much time do you have?", TIMEBUCKETS.map(([k,l])=>
+      `<button class="chip ${choreFilterTime===k?'on':''}" onclick="filterTime('${k}')">${l}</button>`).join(''))
+   +row("What matters most?",
+      `<button class="chip ${choreFilterPri?'on':''}" onclick="filterPri()">Priority only</button>`
+     +`<button class="chip ${choreFilterDue==='overdue'?'on':''}" onclick="filterDue('overdue')">Overdue</button>`
+     +`<button class="chip ${choreFilterDue==='today'?'on':''}" onclick="filterDue('today')">Due today</button>`
+     +`<button class="chip ${choreFilterDue==='week'?'on':''}" onclick="filterDue('week')">Next 7 days</button>`
+     +`<button class="chip ${choreFilterDue==='none'?'on':''}" onclick="filterDue('none')">No due date</button>`)
+   +row("Who's available?", whos.map(w=>
+      `<button class="chip ${choreFilterWho===w?'on':''} ${memberByName(w)?.avatar?'hasface':''}" onclick="filterWho(${q(w)})">${memberFace(w,true)}</button>`).join(''))
+   +row("Which part of the house?", areas.map(a=>
+      `<button class="chip ${choreFilterArea===a?'on':''}" onclick="filterArea(${q(a)})">${esc(a)}</button>`).join('')
+     +types.map(t=>`<button class="chip ${choreFilterType===t?'on':''}" onclick="filterType(${q(t)})">${esc(t)}</button>`).join(''))
+   +row("", (nGap?`<button class="chip ${choreGapsOnly?'on':''}" onclick="toggleChoreGaps()">Needs details · ${nGap}</button>`:'')
+     +(anyChoreFilter()?`<button class="chip" onclick="clearFilters()">Clear all filters</button>`:''));
+
+  let list=D.chores.filter(choreMatches);
   list.sort((a,b)=>{
     if(!!b.priority-!!a.priority) return !!b.priority-!!a.priority;
     return (daysUntil(a.dueBy)??9e9)-(daysUntil(b.dueBy)??9e9);
   });
-  const body=list.length?list.map(choreCard).join(''):`<div class="empty card">Nothing matches that filter.</div>`;
-  return sub+filters+body;
+  const body=list.length?list.map(choreCard).join('')
+    :`<div class="empty card"><p><strong>Nothing matches.</strong></p>
+       <p>Try widening one of the filters above — most often it is the time bucket,
+       since chores with no estimate are hidden by it.</p></div>`;
+  return sub+filters+bulkBar(list)+body;
+}
+const anyChoreFilter=()=>!!(choreFilterType||choreFilterWho||choreFilterTime||choreFilterArea||choreFilterDue||choreFilterPri||choreGapsOnly);
+function choreMatches(c){
+  if(choreFilterType&&c.type!==choreFilterType) return false;
+  if(choreFilterWho&&!(c.assignees||[]).includes(choreFilterWho)) return false;
+  if(choreFilterArea&&c.area!==choreFilterArea) return false;
+  if(choreFilterPri&&!c.priority) return false;
+  if(choreGapsOnly&&!choreGaps(c).length) return false;
+  /* A chore with no estimate is not "quick" — it is unknown. Hiding it from a
+     time filter is honest; silently calling it 10 minutes would not be. */
+  if(choreFilterTime&&timeBucket(c.minutes)!==choreFilterTime) return false;
+  if(choreFilterDue){
+    const d=daysUntil(c.dueBy);
+    if(choreFilterDue==='none'&&c.dueBy) return false;
+    if(choreFilterDue==='overdue'&&!(d!==null&&d<0)) return false;
+    if(choreFilterDue==='today'&&d!==0) return false;
+    if(choreFilterDue==='week'&&!(d!==null&&d>=0&&d<=7)) return false;
+  }
+  return true;
 }
 window.filterType=t=>{choreFilterType=choreFilterType===t?null:t;render()};
 window.filterWho=w=>{choreFilterWho=choreFilterWho===w?null:w;render()};
-window.clearFilters=()=>{choreFilterType=choreFilterWho=null;choreGapsOnly=false;render()};
+window.filterArea=a=>{choreFilterArea=choreFilterArea===a?null:a;render()};
+window.filterTime=t=>{choreFilterTime=choreFilterTime===t?null:t;render()};
+window.filterDue=d=>{choreFilterDue=choreFilterDue===d?null:d;render()};
+window.filterPri=()=>{choreFilterPri=!choreFilterPri;render()};
+window.clearFilters=()=>{choreFilterType=choreFilterWho=choreFilterArea=choreFilterTime=choreFilterDue=null;
+  choreFilterPri=false;choreGapsOnly=false;render()};
 window.toggleChoreGaps=()=>{choreGapsOnly=!choreGapsOnly;render()};
 
-window.newChore=()=>{choreDraft={title:'',type:null,recurrence:'none',interval:7,checkIn:'',dueBy:todayISO(),notes:'',assignees:[],priority:false,needsHelp:false};render()};
+window.newChore=()=>{choreDraft={title:'',type:null,area:null,minutes:null,recurrence:'none',interval:7,checkIn:'',dueBy:todayISO(),notes:'',assignees:[],priority:false,needsHelp:false};render()};
 window.editChore=id=>{closeSheet();choreDraft={...D.chores.find(x=>x.id===id)};render()};
 function viewChoreForm(){
   const c=choreDraft;
@@ -1248,6 +1465,11 @@ function viewChoreForm(){
       <input class="field" id="cTitle" placeholder="What needs doing?" value="${esc(c.title)}" oninput="choreDraft.title=this.value">
       <div><div class="micro" style="margin-bottom:8px">Type</div><div class="chiprow">${D.choreTypes.map(t=>
         `<button class="chip ${c.type===t.name?'on':''}" onclick="cdSet('type',${q(t.name)})">${esc(t.name)}</button>`).join('')}</div></div>
+      <div><div class="micro" style="margin-bottom:8px">Part of the house</div><div class="chiprow">${D.areas.map(a=>
+        `<button class="chip ${c.area===a.name?'on':''}" onclick="cdSet('area',${q(a.name)})">${esc(a.name)}</button>`).join('')}</div></div>
+      <div><div class="micro" style="margin-bottom:8px">Roughly how long is the next step?</div><div class="chiprow">${
+        [10,20,30,45,60,90,120,180].map(m=>`<button class="chip ${+c.minutes===m?'on':''}" onclick="cdSet('minutes',${m})">${minsLabel(m)}</button>`).join('')}
+        <button class="chip ${!(+c.minutes>0)?'on':''}" onclick="cdSet('minutes',0)">Not sure</button></div></div>
       <div><div class="micro" style="margin-bottom:8px">Repeats</div><div class="chiprow">${RECURRENCES.map(([k,l])=>
         `<button class="chip ${c.recurrence===k?'on':''}" onclick="cdSet('recurrence','${k}')">${l}</button>`).join('')}
         ${c.recurrence==='custom'?`<input class="field" style="width:110px;min-height:44px" type="number" min="1" value="${c.interval}" oninput="choreDraft.interval=+this.value||1">`:''}</div></div>
@@ -1272,7 +1494,8 @@ function viewChoreForm(){
       <button class="btn ghost" onclick="choreDraft=null;render()">Cancel</button>
     </div></section>`;
 }
-window.cdSet=(k,v)=>{choreDraft[k]=(choreDraft[k]===v&&k==='type')?null:v;render()};
+window.cdSet=(k,v)=>{choreDraft[k]=(choreDraft[k]===v&&(k==='type'||k==='area'))?null:v;
+  if(k==='minutes'&&!(v>0)) choreDraft.minutes=null; render()};
 window.cdWho=n=>{const a=choreDraft.assignees; const i=a.indexOf(n); i<0?a.push(n):a.splice(i,1); render()};
 window.saveChore=async()=>{
   const c=choreDraft;
@@ -1846,7 +2069,7 @@ window.deletePrize=async id=>{
 };
 
 /* ===================== SETTINGS ===================== */
-const PANES=[['members','Names'],['prizes','Prizes'],['cats','Categories'],['ctypes','Chore types'],['habits','Habits'],['stores','Stores'],['places','Places'],['library','Food library'],['data','Backup'],['sync','Sync'],['storage','Storage']];
+const PANES=[['members','Names'],['prizes','Prizes'],['cats','Categories'],['ctypes','Chore types'],['habits','Habits'],['stores','Stores'],['places','Places'],['areas','Rooms'],['library','Food library'],['data','Backup'],['sync','Sync'],['storage','Storage']];
 function viewSettings(){
   const bar=`<div class="subbar">${PANES.map(([k,l])=>
     `<button class="chip ${settingsPane===k?'on':''}" onclick="setPane('${k}')">${l}</button>`).join('')}</div>`;
@@ -1857,6 +2080,7 @@ function viewSettings(){
     : settingsPane==='prizes'?paneprizes()
     : settingsPane==='stores'?paneList('stores','Shops',CAP.stores,'Shopping items group by shop. Deleting a shop in use asks where its items should move.')
     : settingsPane==='places'?paneLocations()
+    : settingsPane==='areas'?paneList('areas','Parts of the house',CAP.areas,'Used by the "Which part of the house?" filter on Chores. Deleting one in use asks where its chores should move.')
     : settingsPane==='library'?paneLibrary()
     : settingsPane==='data'?paneData()
     : settingsPane==='sync'?paneSync()
@@ -1871,9 +2095,10 @@ function usageCount(store,name){
   if(store==='members') return D.chores.filter(c=>(c.assignees||[]).includes(name)).length+D.habitLogs.filter(l=>l.member===name).length;
   if(store==='stores') return D.shopping.filter(s=>s.store===name).length;
   if(store==='locations') return D.items.filter(i=>i.location===name).length;
+  if(store==='areas') return D.chores.filter(c=>c.area===name).length;
   return 0;
 }
-const UNIT={categories:'item',choreTypes:'chore',habits:'log',members:'record',stores:'item',locations:'item'};
+const UNIT={categories:'item',choreTypes:'chore',habits:'log',members:'record',stores:'item',locations:'item',areas:'chore'};
 const ZONES=[['fridge','Fridge cold'],['freezer','Freezer'],['pantry','Cupboard / room temp'],['counter','Counter']];
 const ZONE_NOTE={fridge:'keeps like a fridge',freezer:'keeps like a freezer',
   pantry:'keeps like a cupboard',counter:'keeps like an open counter'};
@@ -1986,6 +2211,7 @@ window.doRename=async(store,id)=>{
   if(store==='habits') for(const l of D.habitLogs.filter(l=>l.habit===old)){l.habit=v;await put('habitLogs',l)}
   if(store==='stores') for(const s of D.shopping.filter(s=>s.store===old)){s.store=v;await put('shopping',s)}
   if(store==='locations') for(const it of D.items.filter(i=>i.location===old)){it.location=v;it.modified=Date.now();await put('items',it)}
+  if(store==='areas') for(const c of D.chores.filter(c=>c.area===old)){c.area=v;c.modified=Date.now();await put('chores',c)}
   if(store==='members'){
     for(const c of D.chores.filter(c=>(c.assignees||[]).includes(old))){c.assignees=c.assignees.map(a=>a===old?v:a);await put('chores',c)}
     for(const l of D.habitLogs.filter(l=>l.member===old)){l.member=v;await put('habitLogs',l)}
@@ -2167,9 +2393,9 @@ const TABLES={
       done:/^(yes|true|1)$/i.test(r.done||''),created:Date.now()}:(errs.push('name is blank'),null)},
   shops:{store:'stores',cols:['name'],ex:['Grocery Store'],
     out:s=>[s.name], inn:(r,errs)=>r.name?.trim()?{name:r.name.trim()}:(errs.push('name is blank'),null)},
-  chores:{store:'chores',cols:['title','type','recurrence','interval_days','check_in','due_by','assignees','priority','needs_help','notes'],
-    ex:['Take out recycling','Garbage','weekly','','','2026-08-10','Alex|Sam','no','no','Blue bin, curb by 7am'],
-    out:c=>[c.title,c.type,c.recurrence,c.interval,c.checkIn,c.dueBy,(c.assignees||[]).join('|'),
+  chores:{store:'chores',cols:['title','type','area','minutes','recurrence','interval_days','check_in','due_by','assignees','priority','needs_help','notes'],
+    ex:['Take out recycling','Garbage','Outside','15','weekly','','','2026-08-10','Alex|Sam','no','no','Blue bin, curb by 7am'],
+    out:c=>[c.title,c.type,c.area,c.minutes,c.recurrence,c.interval,c.checkIn,c.dueBy,(c.assignees||[]).join('|'),
       c.priority?'yes':'no',c.needsHelp?'yes':'no',c.notes],
     inn:(r,errs,warns)=>{
       if(!r.title?.trim()) return errs.push('title is blank'),null;
@@ -2177,7 +2403,12 @@ const TABLES={
       if(!R) return errs.push(`recurrence "${r.recurrence}" was not understood. Accepted: none/once, daily, weekly, monthly, `
         +`yearly, quarterly, fortnightly, "every 3 days", "every 2 weeks", or custom/every_n_days with interval_days set`),null;
       for(const f of ['check_in','due_by']) if(r[f]&&!/^\d{4}-\d{2}-\d{2}$/.test(r[f])) return errs.push(`${f} must be YYYY-MM-DD`),null;
-      return {title:r.title.trim(),type:r.type||null,recurrence:R.recurrence,interval:R.interval,
+      const area=r.area?D.areas.find(a=>a.name.toLowerCase()===r.area.toLowerCase()):null;
+      if(r.area&&!area) warns.push(`part of the house "${r.area}" is not set up here — imported without one`);
+      const mins=+r.minutes>0?Math.round(+r.minutes):null;
+      if(r.minutes&&!mins) warns.push(`minutes "${r.minutes}" is not a positive number — imported without an estimate`);
+      return {title:r.title.trim(),type:r.type||null,area:area?area.name:null,minutes:mins,
+        recurrence:R.recurrence,interval:R.interval,
         checkIn:r.check_in||'',dueBy:r.due_by||'',assignees:(r.assignees||'').split('|').filter(Boolean),
         priority:/^(yes|true|1)$/i.test(r.priority||''),needsHelp:/^(yes|true|1)$/i.test(r.needs_help||''),
         notes:r.notes||'',created:Date.now(),modified:Date.now()};
@@ -2616,7 +2847,13 @@ async function pushChanges(){
 
 async function pullChanges(){
   const cur=(await meta('cursor'))?.at||'1970-01-01T00:00:00Z';
+  /* owner=eq is redundant with RLS, which already scopes every row to this
+     household. It is here as defence in depth: if a policy is ever edited
+     wrongly, this device declines to merge another household's chores rather
+     than silently absorbing them. */
+  const me=(await session())?.uid;
   const r=await authFetch(`/rest/v1/records?select=store,uid,data,modified,deleted,synced_at`
+    +(me?`&owner=eq.${encodeURIComponent(me)}`:'')
     +`&synced_at=gt.${encodeURIComponent(cur)}&order=synced_at.asc&limit=1000`,
     {headers:PROFILE('GET')});
   if(!r.ok) throw new Error(`pull failed (${r.status}) ${await r.text()}`);
