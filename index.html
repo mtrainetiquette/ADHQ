@@ -528,6 +528,10 @@ const SERIES=['#f5c84c','#5fd08a','#6fb3e8','#b98ae0','#f0a35e','#e8646a','#7fd9
    SYNC.enabled=false  -> Local edition. Nothing below ever touches the network;
                           invariant #1 (works in airplane mode) holds literally.
    SYNC.enabled=true   -> Connected edition. Structured text only, never blobs. */
+/* Shown in Setup -> Storage and under the menu. Bump on every hand-off.
+   Eight rounds of "is this the new file?" is eight rounds too many. */
+const BUILD='2026-08-09 · r8';
+
 const SYNC={
   enabled:true,
   url:'https://ifowaucmvfscjxpsxhqb.supabase.co',
@@ -1118,7 +1122,8 @@ function viewMenu(){
        <span class="mico" aria-hidden="true">${ico}</span>
        <span class="mlabel">${label}</span>
        <span class="msub">${esc(sub())}</span>
-     </button>`).join('')}</div>`;
+     </button>`).join('')}</div>
+     <p class="suggest" style="text-align:center;margin-top:14px">${esc(BUILD)}${SYNC.enabled?' · Connect':' · Local'}</p>`;
 }
 window.goTab=t=>{tab=t;draft=null;choreDraft=null;batch=null;render()};
 
@@ -2099,10 +2104,21 @@ window.deletePrize=async id=>{
 };
 
 /* ===================== SETTINGS ===================== */
-const PANES=[['members','Names'],['prizes','Prizes'],['cats','Categories'],['ctypes','Chore types'],['habits','Habits'],['stores','Stores'],['places','Places'],['areas','Rooms'],['library','Food library'],['data','Backup'],['sync','Sync'],['storage','Storage']];
+const PANES=[['members','Names'],['prizes','Prizes'],['cats','Categories'],['ctypes','Chore types'],['habits','Habits'],['stores','Stores'],['places','Places'],['areas','Rooms'],['library','Food library'],['data','Backup'],['tidy','Duplicates'],['sync','Sync'],['storage','Storage']];
+const PANEGROUPS=[
+  ['Your household lists',['members','prizes','cats','ctypes','habits','stores','places','areas']],
+  ['Food library',        ['library']],
+  ['Data and cleanup',    ['data','tidy','storage']],
+  ['This device',         ['sync']],
+];
 function viewSettings(){
-  const bar=`<div class="subbar">${PANES.map(([k,l])=>
-    `<button class="chip ${settingsPane===k?'on':''}" onclick="setPane('${k}')">${l}</button>`).join('')}</div>`;
+  /* Grouped under plain headings, same shape as the chore filters. A single
+     13-chip strip wrapped to three anonymous lines and new panes disappeared
+     into it — which is exactly what happened to Duplicates. */
+  const label=k=>PANES.find(p=>p[0]===k)?.[1]||k;
+  const bar=PANEGROUPS.map(([title,keys])=>`<div class="filterrow"><span class="flabel">${title}</span>
+    <div class="subbar">${keys.map(k=>
+      `<button class="chip ${settingsPane===k?'on':''}" onclick="setPane('${k}')">${label(k)}</button>`).join('')}</div></div>`).join('');
   const pane = settingsPane==='members'?paneList('members','Household names',CAP.members,'Names appear as buttons for chores and habits. Deleting a name keeps their history.')
     : settingsPane==='cats'?paneList('categories','Food categories',CAP.cats,'Deleting a category in use asks where its items should move — items are never deleted.')
     : settingsPane==='ctypes'?paneList('choreTypes','Chore types',CAP.choreTypes,'Deleting a type in use asks where its chores should move.')
@@ -2113,6 +2129,7 @@ function viewSettings(){
     : settingsPane==='areas'?paneList('areas','Parts of the house',CAP.areas,'Used by the "Which part of the house?" filter on Chores. Deleting one in use asks where its chores should move.')
     : settingsPane==='library'?paneLibrary()
     : settingsPane==='data'?paneData()
+    : settingsPane==='tidy'?paneTidy()
     : settingsPane==='sync'?paneSync()
     : paneStorage();
   return bar+pane;
@@ -2647,6 +2664,86 @@ window.doImport=async()=>{
 function showReport(html){ const el=$('#impReport'); if(el) el.innerHTML=`<div class="report">${html}</div>` }
 
 /* ---------- storage readout ---------- */
+/* ===================== TIDY UP: DUPLICATES =====================
+   Deliberately a MERGE, not a delete. Two copies of "Wash sheets" are rarely
+   identical — one has the room, the other has the time estimate — so throwing
+   the extras away loses information that was typed in by hand. The keeper
+   absorbs every field the others have and it does not, then the rest go.
+
+   Deletion goes through del(), so tombstones are written and the removals
+   propagate to the other devices instead of being resurrected on next pull.
+   ============================================================== */
+const DUPSPEC={
+  chores:{label:'Chores',   key:c=>norm(c.title), title:c=>c.title,
+          fields:['type','area','minutes','dueBy','notes','recurrence','interval','checkIn','assignees','priority','needsHelp']},
+  items: {label:'Food',     key:i=>norm(i.name)+'|'+norm(i.location||''), title:i=>i.name,
+          fields:['category','location','container','libId','eatBy']},
+};
+const norm=s=>String(s??'').toLowerCase().replace(/\s+/g,' ').trim();
+const filled=v=>Array.isArray(v)?v.length>0:v!==null&&v!==undefined&&v!==''&&v!==false;
+
+function dupGroups(store){
+  const spec=DUPSPEC[store], by={};
+  for(const r of D[store]||[]){ const k=spec.key(r); if(k) (by[k]??=[]).push(r); }
+  return Object.values(by).filter(g=>g.length>1).map(g=>{
+    /* keep the richest record; oldest wins a tie, so the original survives */
+    const score=r=>spec.fields.filter(f=>filled(r[f])).length;
+    const sorted=[...g].sort((a,b)=>score(b)-score(a)||(a.created||0)-(b.created||0)||a.id-b.id);
+    return {keep:sorted[0],drop:sorted.slice(1),
+            gains:spec.fields.filter(f=>!filled(sorted[0][f])&&sorted.slice(1).some(r=>filled(r[f])))};
+  }).sort((a,b)=>b.drop.length-a.drop.length);
+}
+let tidyStore='chores';
+window.setTidy=s=>{tidyStore=s;render()};
+function paneTidy(){
+  const spec=DUPSPEC[tidyStore], groups=dupGroups(tidyStore);
+  const nDrop=groups.reduce((n,g)=>n+g.drop.length,0);
+  const rows=groups.slice(0,60).map(g=>{
+    const gain=g.gains.length?`<span class="chip sm">keeps ${g.gains.length} field${g.gains.length===1?'':'s'} from the copies</span>`:'';
+    return `<div class="brow"><b>${esc(spec.title(g.keep))}</b>
+      <div class="bchips"><span class="chip sm">${g.drop.length+1} copies → 1</span>${gain}</div></div>`;
+  }).join('');
+  return `<section class="block card"><h3>Duplicates</h3>
+    <div class="chiprow" style="margin-bottom:10px">${Object.entries(DUPSPEC).map(([s,sp])=>
+      `<button class="chip ${tidyStore===s?'on':''}" onclick="setTidy('${s}')">${sp.label}</button>`).join('')}</div>
+    ${groups.length?`
+      <p class="suggest">${groups.length} title${groups.length===1?'':'s'} appear more than once —
+      <b>${nDrop}</b> extra record${nDrop===1?'':'s'} in total.</p>
+      <div class="btable">${rows}</div>
+      ${groups.length>60?`<p class="suggest">…and ${groups.length-60} more.</p>`:''}
+      <div class="actions" style="margin-top:12px">
+        <button class="btn" onclick="mergeDupes()">Merge into ${groups.length}</button></div>
+      <p class="suggest" style="margin-top:10px">Nothing is thrown away blindly: the copy that survives
+      first absorbs every field the others filled in and it did not. Removals are recorded properly, so
+      they disappear on your other devices too rather than coming back on the next sync.</p>`
+    :`<p class="suggest">No duplicate ${spec.label.toLowerCase()} found. Two entries count as duplicates
+      when their ${tidyStore==='chores'?'titles match':'names and places match'}, ignoring capitals and
+      extra spaces.</p>`}
+  </section>`;
+}
+window.mergeDupes=async()=>{
+  const store=tidyStore, spec=DUPSPEC[store], groups=dupGroups(store);
+  if(!groups.length) return toast('Nothing to merge');
+  const nDrop=groups.reduce((n,g)=>n+g.drop.length,0);
+  if(!await confirmBox(`Merge <b>${groups.length}</b> duplicated ${spec.label.toLowerCase()} entries and remove
+    <b>${nDrop}</b> extra copies?<br><br>The surviving entry keeps every field any copy had filled in.`,
+    'Merge','Cancel')) return;
+  let filledIn=0;
+  for(const g of groups){
+    let changed=false;
+    for(const f of spec.fields){
+      if(filled(g.keep[f])) continue;
+      const src=g.drop.find(r=>filled(r[f]));
+      if(src){ g.keep[f]=src[f]; changed=true; filledIn++; }
+    }
+    if(changed){ g.keep.modified=Date.now(); await put(store,g.keep); }
+    for(const r of g.drop) await del(store,r.id);
+  }
+  await reload(store);
+  render();
+  toast(`Merged ${groups.length} · removed ${nDrop} copies${filledIn?` · recovered ${filledIn} fields`:''}`,{sticky:true});
+};
+
 function paneStorage(){
   const sizes=STORES.filter(s=>!['messages','prizes'].includes(s)).map(s=>({s,n:D[s].length,b:new Blob([JSON.stringify(D[s])]).size}));
   const media={text:0,drawing:0,photo:0,audio:0};
@@ -2668,7 +2765,13 @@ function paneStorage(){
       <p class="suggest">${persisted?'Storage is marked persistent — the system should not clear it to reclaim space.'
         :'Storage is <b>not</b> marked persistent. The system could clear it if the tablet runs low on space. Export regularly.'}</p>`;
   },30);
-  return `<section class="block card"><h3>Device storage</h3><div id="quota"><p class="suggest">Measuring…</p></div></section>
+  return `<section class="block card"><h3>This build</h3>
+      <div class="kv"><span>Version</span><b>${esc(BUILD)}</b></div>
+      <div class="kv"><span>Edition</span><b>${SYNC.enabled?'Connect':'Local'}</b></div>
+      <div class="kv"><span>Storage schema</span><b>v${DB_VERSION} · ${esc(dbName)}</b></div>
+      <p class="suggest">Quote the version when reporting anything — it is the fastest way to tell
+      a bug from an old file still in the browser cache.</p></section>
+    <section class="block card"><h3>Device storage</h3><div id="quota"><p class="suggest">Measuring…</p></div></section>
     <section class="block card"><h3>What's stored here</h3>
       ${sizes.filter(x=>x.n).map(x=>`<div class="kv"><span>${x.s} · ${x.n} row${x.n===1?'':'s'}</span><b>${bytes(x.b)}</b></div>`).join('')}
       ${D.prizes.length?`<div class="kv"><span>prizes · ${D.prizes.length} queued</span><b>${bytes(prizeBytes)}</b></div>`:''}
