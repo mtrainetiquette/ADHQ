@@ -590,22 +590,48 @@ async function dbNameFor(uid){
   return map[uid];
 }
 
-function openDB(name){
-  dbName=name||dbName;
+/* Bump this whenever a store is added. Forgetting to is exactly what broke
+   `areas`: STORES listed it, the version did not change, onupgradeneeded never
+   fired, and the store was simply absent on every device that had already run
+   the previous build (TRANSFER.md invariant #5).
+   The self-heal below means forgetting again is no longer fatal — but bump it
+   anyway, because the heal costs an extra open. */
+const DB_VERSION=8;
+const AUX_STORES=['library','libmeta','sync'];   /* outside STORES on purpose */
+
+function idbOpen(name,version){
   return new Promise((res,rej)=>{
-    const rq=indexedDB.open(dbName,7);
+    const rq=version?indexedDB.open(name,version):indexedDB.open(name);
     rq.onupgradeneeded=e=>{
       const d=e.target.result;
       for(const s of STORES) if(!d.objectStoreNames.contains(s)) d.createObjectStore(s,{keyPath:'id',autoIncrement:true});
       if(!d.objectStoreNames.contains('library')) d.createObjectStore('library',{keyPath:'fid'});
       if(!d.objectStoreNames.contains('libmeta')) d.createObjectStore('libmeta',{keyPath:'kind'});
-      /* v6: sync bookkeeping — session, cursor, tombstones. Outside STORES,
-         like library/libmeta, so "Erase all data" and CSV backup ignore it. */
+      /* sync bookkeeping — cursor and tombstones. Outside STORES, like
+         library/libmeta, so "Erase all data" and CSV backup ignore it. */
       if(!d.objectStoreNames.contains('sync')) d.createObjectStore('sync',{keyPath:'k'});
     };
-    rq.onsuccess=e=>{db=e.target.result;res()};
+    rq.onsuccess=e=>res(e.target.result);
     rq.onerror=()=>rej(rq.error);
   });
+}
+
+/* Open, then CHECK. A version number is a promise that the schema matches, and
+   promises about schemas get broken. If any expected store is missing, reopen
+   one version higher to force an upgrade rather than failing every read for the
+   rest of the session. */
+async function openDB(name){
+  dbName=name||dbName;
+  db=await idbOpen(dbName);                      /* no version: whatever exists */
+  const want=STORES.concat(AUX_STORES);
+  const missing=want.filter(s=>!db.objectStoreNames.contains(s));
+  if(missing.length||db.version<DB_VERSION){
+    const target=Math.max(DB_VERSION,db.version+(missing.length?1:0));
+    db.close();
+    db=await idbOpen(dbName,target);
+  }
+  const still=want.filter(s=>!db.objectStoreNames.contains(s));
+  if(still.length) throw new Error('storage is missing: '+still.join(', '));
 }
 function tx(store,mode,fn){
   return new Promise((res,rej)=>{
@@ -644,7 +670,11 @@ async function del(s,k){
 }
 
 /* ---------- state ---------- */
-const D={items:[],categories:[],shopping:[],common:[],members:[],chores:[],choreTypes:[],choreHistory:[],habits:[],habitLogs:[],locations:[],areas:[]};
+/* Derived from STORES so it cannot drift out of step with it. Hand-listing the
+   keys is how `messages`, `stores` and `prizes` ended up missing here, which is
+   why a failure in loadAll turned into "cannot read properties of undefined"
+   inside render() instead of one clear error. */
+const D=Object.fromEntries(STORES.map(s=>[s,[]]));
 let tab='menu', foodSub='list', sortMode='soonest', draft=null, foodSearch='';
 let choreFilterType=null, choreFilterWho=null, choreDraft=null;
 let batch=null, foodGapsOnly=false, choreGapsOnly=false;
@@ -3062,7 +3092,17 @@ const HAS_DIALOG=typeof HTMLDialogElement!=='undefined'&&!!HTMLDialogElement.pro
     document.addEventListener('visibilitychange',()=>{ if(!document.hidden&&!gated) syncNow(true); });
     const s=await session();
     if(!s) return showGate();        /* no session stored: gate. No network needed to decide. */
-    await startHousehold();
+    try{ await startHousehold(); }
+    catch(e){                        /* never leave a blank screen with only a console error */
+      document.documentElement.classList.remove('gated');
+      $('#main').className='';
+      $('#main').innerHTML=`<section class="block card"><h3>Storage could not be opened</h3>
+        <p class="suggest">${esc(String(e.message||e))}</p>
+        <p class="suggest">Your data is still on this device. Closing every other tab running ADHQ
+        and reloading usually clears this — an open tab on an older version can block the upgrade.</p>
+        <div class="actions"><button class="btn" onclick="location.reload()">Reload</button></div></section>`;
+      return;
+    }
     syncNow(true); libSync(true);
     return;
   }
