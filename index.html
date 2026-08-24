@@ -16,6 +16,9 @@
     --shadow-ink:#000000;
     /* status colors stay semantic — these signal food safety, not decoration */
     --fresh:#5fd08a; --soon:#f0a35e; --late:#e8646a; --cool:#6fb3e8; --plum:#b98ae0;
+    /* Its own variable rather than a reuse of --fresh: that green means food is
+       safe to eat, and a re-theme must be able to move one without the other. */
+    --tick-line:#5fd08a;
     --tap:56px; --radius:14px;
   }
   *{box-sizing:border-box;margin:0;padding:0}
@@ -223,6 +226,21 @@
   .guide .head{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
   .sheet .actions{display:flex;gap:10px;margin-top:18px;flex-wrap:wrap}
   .sheet .actions .btn{flex:1;min-width:140px}
+  /* Centred variant. Opt-in per sheet: every other popup stays a bottom sheet,
+     where a thumb already is on a tablet held two-handed. */
+  .scrim.mid{align-items:center;padding:12px}
+  .sheet.mid{width:100%;max-width:560px;border-radius:22px;text-align:center;
+    padding:22px 18px}
+  .sheet.mid .sub{margin-bottom:2px}
+  .sheet.mid .actions .btn{flex:1 1 auto}
+  /* The tick section: the one tap that makes a claim about who did the work, so
+     it is outlined rather than sharing the neutral card line. */
+  .card.whodid{border:2px solid var(--tick-line);text-align:center}
+  .card.whodid .chiprow{justify-content:center}
+  .card.whodid .chip{border:2px solid var(--tick-line)}
+  /* Skipping is not a person, so it is the one chip in the row drawn open. Still
+     the same green and weight — it is an equal option, not a lesser one. */
+  .card.whodid .chip.skip{border-style:dashed;background:transparent}
   dialog.confirm{border:1px solid var(--line);border-radius:18px;background:var(--panel);color:var(--text);
     padding:22px;max-width:420px;width:90%}
   dialog.confirm::backdrop{background:rgba(0,0,0,.55)}
@@ -550,7 +568,7 @@ const SERIES=['#f5c84c','#5fd08a','#6fb3e8','#b98ae0','#f0a35e','#e8646a','#7fd9
    SYNC.enabled=true   -> Connected edition. Structured text only, never blobs. */
 /* Shown in Setup -> Storage and under the menu. Bump on every hand-off.
    Eight rounds of "is this the new file?" is eight rounds too many. */
-const BUILD='2026-08-24 · r15';
+const BUILD='2026-08-24 · r16';
 
 const SYNC={
   enabled:true,
@@ -1382,8 +1400,19 @@ const rlog=(c,iso,i)=>(D.routineLogs||[]).find(l=>l.key===rkey(c,iso,i));
 /* GRACE_DAYS=1: an occurrence for today can still be ticked tomorrow. Once the
    whole of the next day has passed it lapses on its own. */
 const GRACE_DAYS=1;
+/* Four states, and the difference between the last two matters:
+     done     someone ticked it, and is credited for it
+     skipped  the house decided this one is not happening — recorded, so it stops
+              asking, but credited to nobody and absent from history
+     lapsed   nobody said anything and the grace day passed; also credits nobody,
+              but nothing is stored, because nothing was decided
+     open/late still outstanding
+   Skipping is stored and lapsing is not, because a skip is a decision a person
+   made and a lapse is the absence of one. Storing a lapse would be inventing a
+   record of something that never happened (invariant #7). */
 function rStatus(c,iso,i){
-  if(rlog(c,iso,i)) return 'done';
+  const lg=rlog(c,iso,i);
+  if(lg) return lg.skipped?'skipped':'done';
   const age=-(daysUntil(iso)??0);            /* days since that date */
   if(age>GRACE_DAYS) return 'lapsed';
   if(age>0) return 'late';                   /* yesterday, still tickable */
@@ -1405,14 +1434,28 @@ window.tickRoutine=async(id,iso,i,who)=>{
   const c=D.chores.find(x=>x.id===id); if(!c)return;
   const slot=rslots(c)[i]??'';
   const existing=rlog(c,iso,i);
-  if(existing){ await del('routineLogs',existing.id); await reload('routineLogs'); render();
-    return toast(`${c.title}${slot?' · '+slot:''} — unticked`); }
+  if(existing){ const wasSkip=!!existing.skipped;
+    await del('routineLogs',existing.id); await reload('routineLogs'); render();
+    return toast(`${c.title}${slot?' · '+slot:''} — ${wasSkip?'back on the list':'unticked'}`); }
   await put('routineLogs',{key:rkey(c,iso,i),choreId:id,date:iso,slot,by:who||'',at:Date.now()});
   /* Routines also land in the normal history, so "who fed the cat" is answerable
      and streaks work. Lapsed ones never do — nobody gets credit for those. */
   await put('choreHistory',{choreId:id,title:c.title+(slot?' · '+slot:''),type:c.type,by:who||'',at:Date.now(),routine:true});
   await reload('routineLogs','choreHistory'); closeSheet(); render();
   toast(`${c.title}${slot?' · '+slot:''} done${who?' by '+who:''}`);
+};
+/* Skipping takes the occurrence off the list without claiming it happened. It
+   writes a routineLog so the app stops asking, and deliberately writes NOTHING
+   to choreHistory: no name, no streak, no prize progress. The eaten-elsewhere
+   dinner, the bin day that fell on a holiday — recording those as done would put
+   a person's name on work nobody did. */
+window.skipRoutine=async(id,iso,i)=>{
+  const c=D.chores.find(x=>x.id===id); if(!c)return;
+  const slot=rslots(c)[i]??'';
+  if(rlog(c,iso,i)) return;                  /* already settled one way or the other */
+  await put('routineLogs',{key:rkey(c,iso,i),choreId:id,date:iso,slot,by:'',skipped:true,at:Date.now()});
+  await reload('routineLogs'); closeSheet(); render();
+  toast(`${c.title}${slot?' · '+slot:''} — skipped, credited to nobody`);
 };
 window.openRoutineTick=(id,iso,i)=>{
   const c=D.chores.find(x=>x.id===id); if(!c)return;
@@ -1424,20 +1467,27 @@ window.openRoutineTick=(id,iso,i)=>{
      one tap away rather than behind an "other" menu. */
   const owners=(c.assignees||[]).filter(n=>D.members.some(m=>m.name===n));
   const ordered=[...D.members].sort((a,b)=>owners.includes(b.name)-owners.includes(a.name));
+  const settled=lg?(lg.skipped?'skipped':'done'):null;
   showSheet(`<h2>${esc(c.title)}${slot?` · ${esc(slot)}`:''}</h2>
     <p class="sub">${esc(fmtDate(iso+'T12:00:00'))}${st==='late'?' · yesterday, still open':''}</p>
-    ${lg?`<section class="block card"><h3>Already done</h3>
-        <p class="suggest">${esc(lg.by||'no one recorded')} · ${fmtDate(lg.at)}</p>
-        <div class="actions"><button class="btn" onclick="tickRoutine(${id},${q(iso)},${i})">Undo</button></div></section>`
-      :`<section class="block card"><h3>Who did it?</h3><div class="chiprow">
+    ${settled?`<section class="block card whodid"><h3>${settled==='skipped'?'Skipped':'Already done'}</h3>
+        <p class="suggest">${settled==='skipped'
+          ? `Taken off the list for this day · ${fmtDate(lg.at)}<br>No one was credited, and it counts toward no streak or prize.`
+          : `${esc(lg.by||'no one recorded')} · ${fmtDate(lg.at)}`}</p>
+        <div class="actions"><button class="btn" onclick="tickRoutine(${id},${q(iso)},${i})">${
+          settled==='skipped'?'Put it back on the list':'Undo'}</button></div></section>`
+      :`<section class="block card whodid"><h3>Who did it?</h3><div class="chiprow">
         ${ordered.map(m=>`<button class="chip big ${owners.includes(m.name)?'on':''}" onclick="tickRoutine(${id},${q(iso)},${i},${q(m.name)})">${memberFace(m.name,false)}</button>`).join('')}
         <button class="chip big" onclick="tickRoutine(${id},${q(iso)},${i},'Someone else')">Someone else</button>
+        <button class="chip big skip" onclick="skipRoutine(${id},${q(iso)},${i})">Skip occurrence</button>
       </div>
       ${owners.length?`<p class="suggest">Usually ${esc(owners.join(' and '))}. Tick whoever actually did it —
-        that is who gets the credit toward streaks and prizes.</p>`:''}</section>`}
+        that is who gets the credit toward streaks and prizes.</p>`:''}
+      <p class="suggest">Skipping takes this one day off the list without saying it was done —
+        no name against it, and no streak or prize progress.</p></section>`}
     <div class="actions">
       <button class="btn" onclick="openChore(${id})">About this routine</button>
-      <button class="btn ghost" onclick="closeSheet()">Close</button></div>`);
+      <button class="btn ghost" onclick="closeSheet()">Close</button></div>`,{mid:true});
 };
 
 /* --- routines as rows in the ordinary chore list ---
@@ -2249,7 +2299,7 @@ window.openChore=id=>{
         const st=rStatus(c,todayISO(),i);
         return routineActive(c,todayISO())
           ? `<button class="chip big ${st==='done'?'on':''}" onclick="closeSheet();openRoutineTick(${id},${q(todayISO())},${i})">${
-              esc(slot||'Tick off')}${st==='done'?' ✓':''}</button>`
+              esc(slot||'Tick off')}${st==='done'?' ✓':st==='skipped'?' — skipped':''}</button>`
           : '';
       }).join('')||`<span style="color:var(--muted)">Not scheduled today.</span>`}</div>
       <p class="suggest">Routines are ticked per day from the chore list, so their history stays
@@ -3775,11 +3825,16 @@ window.doWipe=async()=>{
 };
 
 /* ---------- sheet & confirm ---------- */
-function showSheet(html){
+/* `opts.mid` centres the popup instead of docking it to the bottom edge. It is
+   per-call rather than global: the bottom sheet is where a thumb already rests
+   on a tablet, so changing every popup to suit one of them would be a cost paid
+   by the other six. */
+function showSheet(html,opts){
   closeSheet();
+  const mid=opts&&opts.mid?' mid':'';
   const scrim=document.createElement('div');
-  scrim.className='scrim';scrim.id='scrim';
-  scrim.innerHTML=`<div class="sheet">${html}</div>`;
+  scrim.className='scrim'+mid;scrim.id='scrim';
+  scrim.innerHTML=`<div class="sheet${mid}">${html}</div>`;
   scrim.addEventListener('click',e=>{if(e.target===scrim)closeSheet()});
   document.body.appendChild(scrim);
 }
