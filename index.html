@@ -83,6 +83,8 @@
     border-radius:12px;padding:12px 14px;font-weight:700;color:var(--text);min-height:48px;cursor:pointer}
   .bulk.open .bulkhead{border-bottom-left-radius:0;border-bottom-right-radius:0}
   .bulkhead .caret{float:right;color:var(--muted)}
+  .bulkhead .headnote{font-weight:600;color:var(--muted);font-size:13px;margin-left:8px}
+  .bulk.open .bulkbody .filterrow:last-child .subbar{padding-bottom:0}
   .bulkbody{border:1px solid var(--line);border-top:0;border-radius:0 0 12px 12px;
     background:var(--panel-2);padding:12px 14px}
   .selcount{align-self:center;font-weight:700;color:var(--muted);font-size:13px}
@@ -530,7 +532,7 @@ const SERIES=['#f5c84c','#5fd08a','#6fb3e8','#b98ae0','#f0a35e','#e8646a','#7fd9
    SYNC.enabled=true   -> Connected edition. Structured text only, never blobs. */
 /* Shown in Setup -> Storage and under the menu. Bump on every hand-off.
    Eight rounds of "is this the new file?" is eight rounds too many. */
-const BUILD='2026-08-09 · r8';
+const BUILD='2026-08-09 · r9';
 
 const SYNC={
   enabled:true,
@@ -652,6 +654,26 @@ const getOne=(s,k)=>tx(s,'readonly',st=>st.get(k));
 const rawPut=(s,v)=>tx(s,'readwrite',st=>st.put(v));
 const rawDel=(s,k)=>tx(s,'readwrite',st=>st.delete(k));
 const clearStore=s=>tx(s,'readwrite',st=>st.clear());
+/* A uuid derived from a string, identical on every device.
+
+   Seeded defaults were the problem: each device seeded its own "Produce",
+   "Costco" and so on with a RANDOM uid, pushed them, and pulled everyone
+   else's. Three devices, three copies of every default list — and the app was
+   right to keep them, because by uid they genuinely were different rows.
+   Seeds are the same content everywhere, so they must have the same identity
+   everywhere. Not cryptographic; it only has to be stable and well spread. */
+function stableUid(s){
+  let a=0x9e3779b9,b=0x85ebca6b,c=0xc2b2ae35,d=0x27d4eb2f;
+  for(let i=0;i<s.length;i++){
+    const k=s.charCodeAt(i);
+    a=Math.imul(a^k,2654435761)>>>0; b=Math.imul(b^a,1597334677)>>>0;
+    c=Math.imul(c^b,2246822519)>>>0; d=Math.imul(d^c,3266489917)>>>0;
+  }
+  const hx=n=>(n>>>0).toString(16).padStart(8,'0');
+  const raw=hx(a)+hx(b)+hx(c)+hx(d);
+  return `${raw.slice(0,8)}-${raw.slice(8,12)}-5${raw.slice(13,16)}-${
+    ((parseInt(raw[16],16)&0x3|0x8).toString(16))}${raw.slice(17,20)}-${raw.slice(20,32)}`;
+}
 const uuid=()=>(globalThis.crypto?.randomUUID?crypto.randomUUID()
   :'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{
     const r=Math.random()*16|0; return (c==='x'?r:(r&0x3|0x8)).toString(16)}));
@@ -683,25 +705,60 @@ let tab='menu', foodSub='list', sortMode='soonest', draft=null, foodSearch='';
 let choreFilterType=null, choreFilterWho=null, choreDraft=null;
 let batch=null, foodGapsOnly=false, choreGapsOnly=false;
 let choreFilterTime=null, choreFilterArea=null, choreFilterDue=null, choreFilterPri=false;
-let choreSel=new Set(), bulkOpen=false;
+let choreSel=new Set(), bulkOpen=false, filtersOpen=false;
 let habitMember=null, habitGraphMode='habit', habitDate=null;
 let settingsPane='members';
 
 async function loadAll(){
   const got=await Promise.all(STORES.map(getAll));
   STORES.forEach((s,i)=>D[s]=got[i]);
-  const seed=async(store,names)=>{ if(D[store].length===0){ for(const name of names) await put(store,{name}); D[store]=await getAll(store);} };
+  /* Seeded rows get a uid derived from store+name, so every device that seeds
+     produces byte-identical identities and the server upsert collapses them
+     into one row instead of one per device. */
+  const seed=async(store,names)=>{ if(D[store].length===0){
+    for(const name of names) await put(store,{name,uid:stableUid(store+'|'+norm(name))});
+    D[store]=await getAll(store);} };
   await seed('categories',DEFAULT_CATS);
   await seed('common',DEFAULT_COMMON);
   await seed('choreTypes',DEFAULT_CHORE_TYPES);
   await seed('habits',DEFAULT_HABITS);
   await seed('stores',DEFAULT_STORES);
   await seed('areas',DEFAULT_AREAS);
-  if(D.locations.length===0){ for(const l of DEFAULT_LOCATIONS) await put('locations',{...l}); D.locations=await getAll('locations'); }
+  if(D.locations.length===0){
+    for(const l of DEFAULT_LOCATIONS) await put('locations',{...l,uid:stableUid('locations|'+norm(l.name))});
+    D.locations=await getAll('locations'); }
   await migrateStorage();
   await migrateUids();
+  await dedupeVocab();
   await refreshLib();
 }
+/* The lists in Setup are vocabularies: two entries with the same name are never
+   deliberate — the add form already refuses them. So collapse them silently on
+   load rather than making someone visit a cleanup screen. Chores and food are
+   NOT in here; those need human judgement and stay in Setup -> Duplicates.
+
+   Nothing has to be repointed: chores store their type as a NAME, not an id, so
+   removing a same-named twin cannot orphan anything. */
+const VOCAB_STORES=['categories','common','choreTypes','habits','stores','locations','areas','members'];
+async function dedupeVocab(){
+  let removed=0;
+  for(const store of VOCAB_STORES){
+    const by={};
+    for(const r of D[store]||[]){ const k=norm(r.name); if(k) (by[k]??=[]).push(r); }
+    for(const g of Object.values(by)){
+      if(g.length<2) continue;
+      /* keep the richest — a member with a photo, a location with a zone — and
+         the oldest on a tie, so the entry people have been using survives */
+      const score=r=>Object.keys(r).filter(k=>!['id','uid','_dirty','modified'].includes(k)&&filled(r[k])).length;
+      const sorted=[...g].sort((a,b)=>score(b)-score(a)||(a.created||a.id)-(b.created||b.id));
+      for(const dup of sorted.slice(1)){ await del(store,dup.id); removed++; }
+    }
+    if(removed) await reload(store);
+  }
+  if(removed) console.info(`ADHQ: collapsed ${removed} duplicate list entries`);
+  return removed;
+}
+
 /* one-time per store: records created before sync was switched on have no `uid`.
    The integer `id` stays as the IndexedDB key — 2,000 lines of app code reference
    it — but it is device-local and collides across devices, so it can never be the
@@ -1176,6 +1233,7 @@ function bulkBar(list){
       :`<p class="suggest" style="margin-top:10px">Tap chores to select them, then choose what to change.</p>`}
     </div></div>`;
 }
+window.toggleFilters=()=>{filtersOpen=!filtersOpen;render()};
 window.toggleBulk=()=>{bulkOpen=!bulkOpen; if(!bulkOpen) choreSel.clear(); render()};
 window.toggleChoreSel=id=>{choreSel.has(id)?choreSel.delete(id):choreSel.add(id);render()};
 window.selAll=()=>{for(const c of D.chores.filter(choreMatches)) choreSel.add(c.id);render()};
@@ -1434,7 +1492,7 @@ function viewChores(){
      first, because that is the real constraint on a Saturday morning. */
   const row=(label,chips)=>chips?`<div class="filterrow"><span class="flabel">${label}</span>
     <div class="subbar">${chips}</div></div>`:'';
-  const filters=
+  const inner=
     row("How much time do you have?", TIMEBUCKETS.map(([k,l])=>
       `<button class="chip ${choreFilterTime===k?'on':''}" onclick="filterTime('${k}')">${l}</button>`).join(''))
    +row("What matters most?",
@@ -1446,10 +1504,28 @@ function viewChores(){
    +row("Who's available?", whos.map(w=>
       `<button class="chip ${choreFilterWho===w?'on':''} ${memberByName(w)?.avatar?'hasface':''}" onclick="filterWho(${q(w)})">${memberFace(w,true)}</button>`).join(''))
    +row("Which part of the house?", areas.map(a=>
-      `<button class="chip ${choreFilterArea===a?'on':''}" onclick="filterArea(${q(a)})">${esc(a)}</button>`).join('')
-     +types.map(t=>`<button class="chip ${choreFilterType===t?'on':''}" onclick="filterType(${q(t)})">${esc(t)}</button>`).join(''))
+      `<button class="chip ${choreFilterArea===a?'on':''}" onclick="filterArea(${q(a)})">${esc(a)}</button>`).join(''))
+   +row("What kind of job?", types.map(t=>
+      `<button class="chip ${choreFilterType===t?'on':''}" onclick="filterType(${q(t)})">${esc(t)}</button>`).join(''))
    +row("", (nGap?`<button class="chip ${choreGapsOnly?'on':''}" onclick="toggleChoreGaps()">Needs details · ${nGap}</button>`:'')
      +(anyChoreFilter()?`<button class="chip" onclick="clearFilters()">Clear all filters</button>`:''));
+
+  /* Collapsed by default: five labelled rows of chips is a wall between someone
+     and their chore list. The summary line has to name the ACTIVE filters, or a
+     closed accordion silently hides why the list looks short. */
+  const active=[
+    choreFilterTime&&TIMEBUCKETS.find(([k])=>k===choreFilterTime)[1],
+    choreFilterPri&&'priority',
+    choreFilterDue&&({overdue:'overdue',today:'due today',week:'next 7 days',none:'no due date'})[choreFilterDue],
+    choreFilterWho, choreFilterArea, choreFilterType,
+    choreGapsOnly&&'needs details',
+  ].filter(Boolean);
+  const summary=active.length?active.join(' · '):'everything';
+  const filters=`<div class="bulk ${filtersOpen?'open':''}">
+    <button class="bulkhead" onclick="toggleFilters()" aria-expanded="${filtersOpen}">
+      What to do? <span class="headnote">${esc(summary)}</span>
+      <span class="caret">${filtersOpen?'▴':'▾'}</span></button>
+    ${filtersOpen?`<div class="bulkbody">${inner}</div>`:''}</div>`;
 
   let list=D.chores.filter(choreMatches);
   list.sort((a,b)=>{
