@@ -198,6 +198,9 @@
   .flag.pri{background:rgba(232,100,106,.20);color:var(--late)}
   .flag.help{background:rgba(111,179,232,.20);color:var(--cool)}
   .flag.who{background:var(--panel-2);color:var(--muted)}
+  /* routines sit in the same list as tasks, so the row itself must look the same.
+     This is the one mark that says why it will be back tomorrow. */
+  .flag.routine{background:rgba(185,138,224,.20);color:var(--plum)}
 
   .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px}
   .grid .chip{justify-content:center;display:flex;align-items:center;min-height:var(--tap)}
@@ -547,7 +550,7 @@ const SERIES=['#f5c84c','#5fd08a','#6fb3e8','#b98ae0','#f0a35e','#e8646a','#7fd9
    SYNC.enabled=true   -> Connected edition. Structured text only, never blobs. */
 /* Shown in Setup -> Storage and under the menu. Bump on every hand-off.
    Eight rounds of "is this the new file?" is eight rounds too many. */
-const BUILD='2026-08-09 · r11';
+const BUILD='2026-08-24 · r15';
 
 const SYNC={
   enabled:true,
@@ -719,8 +722,14 @@ const D=Object.fromEntries(STORES.map(s=>[s,[]]));
 let tab='menu', foodSub='list', sortMode='soonest', draft=null, foodSearch='';
 let choreFilterType=null, choreFilterWho=null, choreDraft=null;
 let batch=null, foodGapsOnly=false, choreGapsOnly=false;
+let foodSel=new Set(), foodSelMode=false, foodGapKind=null;
 let choreFilterTime=null, choreFilterArea=null, choreFilterDue=null, choreFilterPri=false;
-let choreSel=new Set(), bulkOpen=false, filtersOpen=false, choreView='tasks';
+let choreSel=new Set(), bulkOpen=false, filtersOpen=false;
+/* Routines are rows in the ordinary chore list, not a list of their own — this
+   only hides or shows them. Session-only, like every other chore filter: a
+   toggle that survived a reload would silently answer "where did my routines
+   go?" with nothing. */
+let showRoutines=true;
 let habitMember=null, habitGraphMode='habit', habitDate=null;
 let settingsPane='members';
 
@@ -969,16 +978,118 @@ function render(){
 /* Derived, never stored — same reasoning as prize milestones (TRANSFER.md §4).
    Filling a blank in makes the tag disappear on its own. */
 const itemGaps=it=>[!it.category&&'category',!it.location&&'place',!it.eatBy&&'eat-by'].filter(Boolean);
-/* A routine has no due date or assignee by design, so those are not gaps for it. */
+/* A routine has no due date — its dates are generated — so that is not a gap.
+   Nor is a missing assignee: a routine CAN be assigned (feeding the cat is Kit's
+   job), but plenty are simply whoever is nearest, and flagging those as
+   incomplete would nag about a blank that is the correct answer. An ordinary
+   chore is different: someone has to own it. */
 const choreGaps=c=>isRoutine(c)
   ? [!c.type&&'type',!(+c.minutes>0)&&'time estimate'].filter(Boolean)
   : [!c.type&&'type',!c.dueBy&&'due date',!(c.assignees||[]).length&&'who',!(+c.minutes>0)&&'time estimate'].filter(Boolean);
 const gapTag=g=>g.length?`<span class="needs">needs details</span>`:'';
+/* ===================== FOOD MULTI-EDIT =====================
+   Deliberately a different shape from the chores bulk editor. Chores got a
+   collapsed accordion at the top of the list, which suits a short list you
+   scan. Food is long, grouped, and the fields are a fixed handful — so this is
+   a docked bar at the bottom instead: pick items while scrolling, and the
+   actions stay in reach under your thumb rather than scrolling away above.
+
+   Each action opens a picker sheet, so the bar stays one line however many
+   categories or places the household has.
+   ========================================================== */
+function foodBar(pool){
+  if(!foodSelMode) return '';
+  const n=foodSel.size;
+  return `<div class="dockspacer"></div><div class="dock">
+    <div class="dockrow">
+      <span class="dockcount">${n?`${n} selected`:'Tap items to pick them'}</span>
+      <button class="chip" onclick="foodSelAll()">All ${pool.length} shown</button>
+      ${n?`<button class="chip" onclick="foodSelNone()">Clear</button>`:''}
+      <button class="chip" onclick="toggleFoodSel()">Done</button>
+    </div>
+    ${n?`<div class="dockrow">
+      <button class="btn sm" onclick="foodPick('category')">Category</button>
+      <button class="btn sm" onclick="foodPick('location')">Place</button>
+      <button class="btn sm" onclick="foodPick('container')">Container</button>
+      <button class="btn sm" onclick="foodPick('eatBy')">Eat-by</button>
+      <button class="btn sm danger" onclick="foodBulkRemove()">Remove</button>
+    </div>`:''}</div>`;
+}
+window.toggleFoodSel=()=>{foodSelMode=!foodSelMode;if(!foodSelMode)foodSel.clear();render()};
+window.toggleFoodPick=id=>{foodSel.has(id)?foodSel.delete(id):foodSel.add(id);render()};
+window.foodSelNone=()=>{foodSel.clear();render()};
+window.foodSelAll=()=>{
+  const gk=foodGapKind?({category:it=>!it.category,location:it=>!it.location,eatBy:it=>!it.eatBy})[foodGapKind]
+    :it=>itemGaps(it).length>0;
+  for(const it of D.items.filter(x=>itemMatches(x,foodSearch)&&(!foodGapsOnly||gk(x)))) foodSel.add(it.id);
+  render();
+};
+const foodSelected=()=>D.items.filter(i=>foodSel.has(i.id));
+
+window.foodPick=field=>{
+  const sel=foodSelected(); if(!sel.length) return toast('Nothing selected');
+  const head=`<h2>${({category:'Category',location:'Where it is kept',container:'Container',eatBy:'Eat-by date'})[field]}</h2>
+    <p class="sub">${sel.length} item${sel.length===1?'':'s'} selected</p>`;
+  if(field==='eatBy'){
+    /* "Use the library's guidance" is per-item, not one shared date: butter and
+       spinach in the same selection get different answers, which is the whole
+       point of having 984 rows of shelf-life data. */
+    const nLib=sel.filter(it=>libRange(libFor(it),it.location)?.days).length;
+    return showSheet(head+`<section class="block card"><h3>Pick a date</h3>
+        <div class="chiprow">${[[0,'Today'],[3,'In 3 days'],[7,'In a week'],[14,'In 2 weeks'],[30,'In a month']]
+          .map(([n,l])=>`<button class="chip" onclick="foodSetAll('eatBy',${q(isoPlus(n))})">${l}</button>`).join('')}</div>
+        <input class="field" type="date" style="margin-top:10px" onchange="foodSetAll('eatBy',this.value)"></section>
+      <section class="block card"><h3>Work it out per item</h3>
+        <p class="suggest">${nLib} of ${sel.length} match something in the food library. Each gets its own
+        date from how long that food keeps where it is stored — an item with no place set, or nothing in
+        the library, is left alone.</p>
+        <div class="actions"><button class="btn ${nLib?'primary':''}" onclick="foodEatByFromLib()">Use the library's guidance</button></div></section>
+      <section class="block card"><h3>Or</h3>
+        <div class="chiprow"><button class="chip" onclick="foodSetAll('eatBy',null)">Clear the date</button></div></section>
+      <div class="actions"><button class="btn ghost" onclick="closeSheet()">Cancel</button></div>`);
+  }
+  const opts=field==='category'?D.categories.map(c=>c.name)
+    :field==='location'?LOCS().map(l=>l.name)
+    :CONTAINERS;
+  showSheet(head+`<section class="block card"><div class="chiprow">${opts.map(o=>
+      `<button class="chip big" onclick="foodSetAll('${field}',${q(o)})">${esc(o)}</button>`).join('')}
+      <button class="chip" onclick="foodSetAll('${field}',null)">Leave blank</button></div></section>
+    <div class="actions"><button class="btn ghost" onclick="closeSheet()">Cancel</button></div>`);
+};
+async function foodApply(fn,label){
+  const sel=foodSelected(); if(!sel.length) return toast('Nothing selected');
+  let touched=0;
+  for(const it of sel){ if(fn(it)===false) continue; it.modified=Date.now(); await put('items',it); touched++; }
+  await reload('items'); render();
+  toast(`${touched} item${touched===1?'':'s'} updated — ${label}`
+    +(touched<sel.length?` · ${sel.length-touched} left alone`:''),{sticky:true});
+}
+window.foodSetAll=(field,v)=>{ closeSheet(); return foodApply(it=>{it[field]=v||null},
+  v?`${field==='eatBy'?'eat-by':field} set`:`${field==='eatBy'?'eat-by':field} cleared`); };
+window.foodEatByFromLib=()=>{ closeSheet(); return foodApply(it=>{
+    const r=libRange(libFor(it),it.location);
+    if(!r?.days) return false;                     /* nothing to go on — do not invent one */
+    it.eatBy=isoPlus(Math.max(1,Math.round(r.days[0])));
+  },'dated from the library'); };
+window.foodBulkRemove=async()=>{
+  const sel=foodSelected(); if(!sel.length) return;
+  if(!await confirmBox(`Remove <b>${sel.length}</b> item${sel.length===1?'':'s'} from what's stored?
+    <br><br>This is for things you have used up or thrown out. It does not touch the shopping list.`,
+    'Remove','Cancel')) return;
+  for(const it of sel) await del('items',it.id);
+  const n=sel.length; foodSel.clear();
+  await reload('items'); render(); toast(`${n} removed`,{sticky:true});
+};
+
 function itemCard(it){
   const meta=[it.category,it.location,it.container,it.eatBy?'eat by '+fmtDate(it.eatBy+'T12:00:00'):null].filter(Boolean).join(' · ');
-  return `<button class="itemcard card" onclick="openItem(${it.id})">
+  const on=foodSel.has(it.id);
+  return `<button class="itemcard card ${foodSelMode&&on?'picked':''}"
+    onclick="${foodSelMode?`toggleFoodPick(${it.id})`:`openItem(${it.id})`}"
+    ${foodSelMode?`aria-pressed="${on}"`:''}>
     ${dayChip(daysLeft(it))}
     <span class="iteminfo"><span class="nm">${esc(it.name)}${gapTag(itemGaps(it))}</span><span class="meta">${esc(meta)}</span></span>
+    ${foodSelMode?`<span class="selring ${on?'on':''}" aria-hidden="true">${on?'✓':''}</span>`:''}
   </button>`;
 }
 function itemMatches(it,query){
@@ -1014,8 +1125,27 @@ function viewFood(){
   const nGap=D.items.filter(it=>itemGaps(it).length).length;
   const bar=`<div class="subbar">${modes.map(([k,l])=>
     `<button class="chip ${sortMode===k?'on':''}" onclick="setSort('${k}')">${l}</button>`).join('')}
-    ${nGap?`<button class="chip ${foodGapsOnly?'on':''}" onclick="toggleFoodGaps()">Needs details · ${nGap}</button>`:''}</div>`;
-  const pool=D.items.filter(it=>itemMatches(it,foodSearch)&&(!foodGapsOnly||itemGaps(it).length));
+    ${nGap?`<button class="chip ${foodGapsOnly?'on':''}" onclick="toggleFoodGaps()">Needs details · ${nGap}</button>`:''}
+    <button class="chip ${foodSelMode?'on':''}" onclick="toggleFoodSel()">${foodSelMode?'Done selecting':'Select'}</button></div>`;
+  /* The plain "needs details" toggle was close to useless: almost every item is
+     missing an eat-by date, so switching it on filtered out three items out of
+     seventy and looked like it had done nothing at all. Naming the specific gap
+     is what makes it actionable — and the count next to each one tells you
+     before you tap whether it will narrow anything. */
+  const GAPKINDS=[['category','No category',it=>!it.category],
+                  ['location','No place',   it=>!it.location],
+                  ['eatBy','No eat-by date',it=>!it.eatBy]];
+  const gapRow=foodGapsOnly?`<div class="filterrow"><span class="flabel">Which detail is missing?</span>
+    <div class="subbar">${GAPKINDS.map(([k,l,f])=>{
+      const n=D.items.filter(f).length;
+      return n?`<button class="chip ${foodGapKind===k?'on':''}" onclick="setFoodGap('${k}')">${l} · ${n}</button>`:'';
+    }).join('')}<button class="chip ${!foodGapKind?'on':''}" onclick="setFoodGap(null)">Any</button></div></div>`:'';
+  const gapTest=foodGapKind?GAPKINDS.find(([k])=>k===foodGapKind)[2]:it=>itemGaps(it).length>0;
+  const pool=D.items.filter(it=>itemMatches(it,foodSearch)&&(!foodGapsOnly||gapTest(it)));
+  const shown=foodGapsOnly||foodSearch
+    ? `<p class="suggest" style="padding:0 4px 6px">Showing ${pool.length} of ${D.items.length}${
+        foodGapsOnly?` · ${esc(foodGapKind?GAPKINDS.find(([k])=>k===foodGapKind)[1].toLowerCase():'missing something')}`:''}</p>`
+    : '';
   if(pool.length===0) return sub+search+`<div class="empty card"><p><strong>No matches for "${esc(foodSearch)}".</strong></p>
     <p>Search covers names, places, and the library's tags and aliases.</p></div>`;
   let body='';
@@ -1034,10 +1164,12 @@ function viewFood(){
     const s=[...pool].sort(sortMode==='newest'?(a,b)=>b.created-a.created:(a,b)=>(daysLeft(a)??9e9)-(daysLeft(b)??9e9));
     body=s.map(itemCard).join('');
   }
-  return sub+search+bar+body;
+  return sub+search+bar+gapRow+shown+foodBar(pool)+body;
 }
-window.setSub=s=>{foodSub=s;draft=null;batch=null;foodSearch='';recipeDraft=null;recipeOpen=null;render()};
-window.toggleFoodGaps=()=>{foodGapsOnly=!foodGapsOnly;render()};
+window.setSub=s=>{foodSub=s;draft=null;batch=null;foodSearch='';recipeDraft=null;recipeOpen=null;
+  foodSelMode=false;foodSel.clear();render()};
+window.toggleFoodGaps=()=>{foodGapsOnly=!foodGapsOnly;if(!foodGapsOnly)foodGapKind=null;render()};
+window.setFoodGap=k=>{foodGapKind=k;render()};
 window.setSort=m=>{sortMode=m;render()};
 
 function guideHTML(item,location){
@@ -1188,11 +1320,14 @@ function choreCard(c){
   </button>`;
 }
 /* one phrasing of a due date, used by the card, the sheet and the bulk toast */
+const routineRhythm=c=>(c.rdays||[]).length?c.rdays.map(n=>WEEKDAYS[n][1]).join(', ')
+  :(+c.interval>1?`every ${c.interval} days`:'every day');
+/* routineWhen() is for the sheet, where nothing else says what this is. The list
+   card uses routineRhythm() alone: the slot is already in its title and the flag
+   already says "routine". */
 const routineWhen=c=>{
-  const days=(c.rdays||[]).length?c.rdays.map(n=>WEEKDAYS[n][1]).join(', ')
-    :(+c.interval>1?`every ${c.interval} days`:'every day');
   const times=(c.slots||[]).length?` · ${c.slots.join(', ')}`:'';
-  return `routine · ${days}${times}`;
+  return `routine · ${routineRhythm(c)}${times}`;
 };
 const dueLabel=c=>isSomeday(c)?'someday':(c.dueBy?'due '+fmtDate(c.dueBy+'T12:00:00'):'no due date');
 const minsLabel=m=>m>=120?`${(m/60).toFixed(m%60?1:0)} hr`:m>=60?`${(m/60).toFixed(m%60?1:0)} hr`:`${m} min`;
@@ -1282,60 +1417,109 @@ window.tickRoutine=async(id,iso,i,who)=>{
 window.openRoutineTick=(id,iso,i)=>{
   const c=D.chores.find(x=>x.id===id); if(!c)return;
   const slot=rslots(c)[i]??'', st=rStatus(c,iso,i), lg=rlog(c,iso,i);
+  /* An assignee says whose job it usually is. The tick says who actually did it,
+     and those are different facts — a routine assigned to Ada that Kit fed this
+     morning must credit Kit, or the history and the streaks are fiction
+     (invariant #7). So assignees are offered first, and everyone else is still
+     one tap away rather than behind an "other" menu. */
+  const owners=(c.assignees||[]).filter(n=>D.members.some(m=>m.name===n));
+  const ordered=[...D.members].sort((a,b)=>owners.includes(b.name)-owners.includes(a.name));
   showSheet(`<h2>${esc(c.title)}${slot?` · ${esc(slot)}`:''}</h2>
     <p class="sub">${esc(fmtDate(iso+'T12:00:00'))}${st==='late'?' · yesterday, still open':''}</p>
     ${lg?`<section class="block card"><h3>Already done</h3>
         <p class="suggest">${esc(lg.by||'no one recorded')} · ${fmtDate(lg.at)}</p>
         <div class="actions"><button class="btn" onclick="tickRoutine(${id},${q(iso)},${i})">Undo</button></div></section>`
       :`<section class="block card"><h3>Who did it?</h3><div class="chiprow">
-        ${D.members.map(m=>`<button class="chip big" onclick="tickRoutine(${id},${q(iso)},${i},${q(m.name)})">${memberFace(m.name,false)}</button>`).join('')}
+        ${ordered.map(m=>`<button class="chip big ${owners.includes(m.name)?'on':''}" onclick="tickRoutine(${id},${q(iso)},${i},${q(m.name)})">${memberFace(m.name,false)}</button>`).join('')}
         <button class="chip big" onclick="tickRoutine(${id},${q(iso)},${i},'Someone else')">Someone else</button>
-      </div></section>`}
+      </div>
+      ${owners.length?`<p class="suggest">Usually ${esc(owners.join(' and '))}. Tick whoever actually did it —
+        that is who gets the credit toward streaks and prizes.</p>`:''}</section>`}
     <div class="actions">
       <button class="btn" onclick="openChore(${id})">About this routine</button>
       <button class="btn ghost" onclick="closeSheet()">Close</button></div>`);
 };
 
-let routineDays=1;                         /* 1 = today, 7 = the week ahead */
-window.setRoutineDays=n=>{routineDays=n;render()};
-function viewRoutines(){
-  const live=D.chores.filter(isRoutine);
-  if(!live.length) return `<div class="empty card">
-    <p><strong>No routines yet.</strong></p>
-    <p>A routine is something that repeats so often it should not be on your task list —
-    feeding the cat, meal prep, bins on Tuesday. Mark any chore as a routine from
-    <b>Edit</b>, or add one now.</p>
-    <div class="actions"><button class="btn primary" onclick="newRoutine()">Add a routine</button></div></div>`;
-  const dayBlock=(iso,label)=>{
-    const rows=routineDay(iso);
-    if(!rows.length) return '';
-    return `<section class="block card"><h3>${esc(label)}</h3>
-      ${rows.map(o=>{
-        const cls={done:'fresh',open:'none',late:'soon',lapsed:'late'}[o.status];
-        const mark={done:'✓',open:'',late:'!',lapsed:'–'}[o.status];
-        const note=o.status==='done'?(o.log.by||'done'):o.status==='lapsed'?'closed itself':o.status==='late'?'still open':'';
-        return `<button class="itemcard card" onclick="openRoutineTick(${o.c.id},${q(iso)},${o.i})">
-          <span class="daychip ${cls}">${mark}</span>
-          <span class="iteminfo"><span class="nm">${esc(o.c.title)}${o.slot?` · ${esc(o.slot)}`:''}</span>
-            <span class="meta">${esc([note,o.c.area,o.c.minutes>0?minsLabel(o.c.minutes):null].filter(Boolean).join(' · '))}</span></span>
-        </button>`;
-      }).join('')}</section>`;
-  };
-  const yesterday=routineDay(isoOf(-1)).some(o=>o.status==='late')?dayBlock(isoOf(-1),'Yesterday · still open'):'';
-  const days=routineDays===1?[[0,'Today']]
-    :Array.from({length:7},(_,n)=>[n,n===0?'Today':n===1?'Tomorrow':fmtDate(isoOf(n)+'T12:00:00')]);
-  return `<div class="subbar">
-      <button class="chip ${routineDays===1?'on':''}" onclick="setRoutineDays(1)">Today</button>
-      <button class="chip ${routineDays===7?'on':''}" onclick="setRoutineDays(7)">Next 7 days</button>
-      <button class="chip" onclick="newRoutine()">+ Add routine</button></div>
-    ${yesterday}
-    ${days.map(([n,label])=>dayBlock(isoOf(n),label)).join('')}
-    <p class="suggest">Anything nobody ticks closes itself the day after — it will not pile up.
-    A closed-by-itself routine credits no one and counts toward no streak or prize.</p>`;
+/* --- routines as rows in the ordinary chore list ---
+   They used to have a page of their own, reached by a tab at the top of Chores.
+   That page answered "what are the rhythms" well and "what should I do next"
+   badly, because the answer to the second question was split across two screens
+   and you had to remember the other one existed. So the occurrences now sit in
+   the task list, sorted by the same urgency as everything else, and the tab is
+   a visibility toggle instead: one list, with a way to quiet part of it.
+
+   What is shown is an OCCURRENCE, not the routine. The routine itself has no due
+   date and no assignee — it is a rhythm, and rhythms are not tasks. Its
+   occurrence on a given day is. */
+function routineWindow(){
+  /* Which days to generate. Default is what is actionable now: today, plus
+     yesterday while it is still inside its grace day. The due filter widens it,
+     which is how the week-ahead look the old page gave is still reachable —
+     through the filter row people already use, rather than a second screen. */
+  if(choreFilterDue==='overdue') return [-1];
+  if(choreFilterDue==='today')   return [0];
+  if(choreFilterDue==='week')    return [0,1,2,3,4,5,6,7];
+  /* A routine has neither a blank due date nor a someday date. It has a rhythm,
+     so those two filters honestly exclude it rather than sweeping it in. */
+  if(choreFilterDue==='none'||choreFilterDue==='someday') return [];
+  return [-1,0];
 }
+/* The same questions the task filters ask, answered for a routine. A routine can
+   have assignees — whose job it usually is — but plenty will not, so an absent
+   one is not a gap (see choreGaps). Under a who filter an unassigned routine is
+   hidden exactly like an unassigned chore: honest either way. */
+function routineMatches(c){
+  if(choreFilterWho&&!(c.assignees||[]).includes(choreFilterWho)) return false;
+  if(choreFilterType&&c.type!==choreFilterType) return false;
+  if(choreFilterArea&&c.area!==choreFilterArea) return false;
+  if(choreFilterPri&&!c.priority) return false;
+  if(choreGapsOnly&&!choreGaps(c).length) return false;
+  if(choreFilterTime&&timeBucket(c.minutes)!==choreFilterTime) return false;
+  return true;
+}
+/* Only what is still outstanding: a ticked occurrence is done and a lapsed one
+   closed itself, and neither belongs on a list of what to do next. */
+function routineRows(){
+  if(!showRoutines||bulkOpen) return [];
+  const out=[];
+  for(const n of routineWindow())
+    for(const o of routineDay(isoOf(n)))
+      if((o.status==='open'||o.status==='late')&&routineMatches(o.c)) out.push(o);
+  return out;
+}
+/* Deliberately the same shape as choreCard: an occurrence IS a task at the
+   moment it is due, and a different visual language was what made routines feel
+   like a separate list even once they shared a screen. The two differences both
+   carry meaning — it opens the who-did-it sheet rather than the chore sheet, and
+   it is flagged, so nobody wonders why it is back tomorrow. */
+function routineCard(o){
+  const c=o.c, d=daysUntil(o.iso);
+  /* The old page grouped occurrences under "Yesterday" and "Today" headings. In
+     one merged list there are no headings, so an occurrence that is not today
+     has to say so in its own row — otherwise yesterday's still-open breakfast
+     and today's are two identical rows and it reads as a duplicate bug. */
+  const when=o.status==='late'?'yesterday, still open':(d>0?fmtDate(o.iso+'T12:00:00'):null);
+  const meta=[when,c.type,c.area,c.minutes>0?minsLabel(c.minutes):null,routineRhythm(c)].filter(Boolean).join(' · ');
+  const who=(c.assignees||[]).join(', ');
+  const flags=[c.priority?'<span class="flag pri">Priority</span>':'',
+    c.needsHelp?'<span class="flag help">Needs help</span>':'',
+    who?`<span class="flag who">${esc(who)}</span>`:'',
+    '<span class="flag routine">Routine</span>'].join('');
+  return `<button class="itemcard card" onclick="openRoutineTick(${c.id},${q(o.iso)},${o.i})">
+    ${dayChip(daysUntil(o.iso))}
+    <span class="iteminfo"><span class="nm">${esc(c.title)}${o.slot?` · ${esc(o.slot)}`:''}${gapTag(choreGaps(c))}</span>
+      <span class="meta">${esc(meta)}</span>
+      <span class="flags">${flags}</span></span>
+  </button>`;
+}
+window.toggleRoutines=()=>{showRoutines=!showRoutines;render()};
+
+/* A routine is something that repeats so often it should not need scheduling —
+   feeding the cat, meal prep, bins on Tuesday. Any chore can become one from
+   Edit; this is the shortcut. */
 window.newRoutine=()=>{choreDraft={title:'',type:null,area:null,minutes:null,routine:true,
   slots:[],rdays:[],interval:1,ranchor:todayISO(),recurrence:'none',checkIn:'',dueBy:'',
-  notes:'',assignees:[],priority:false,needsHelp:false};choreView='tasks';render()};
+  notes:'',assignees:[],priority:false,needsHelp:false};showRoutines=true;render()};
 
 /* ===================== RECIPES =====================
    Formatting is stored as MARKDOWN-ish text, not HTML. Storing HTML would mean
@@ -1698,7 +1882,12 @@ function batchParse(kind,text){
 }
 const batchGaps=(kind,r)=>kind==='food'
   ? ['category','location','eat-by'].filter((_,i)=>![r.category,r.location,r.eatBy][i])
-  : ['type','repeat','due date','who','time'].filter((_,i)=>![r.type,r.recurrence,r.dueBy,r.assignees?.length,r.minutes][i]);
+  /* Same rule as choreGaps: a routine generates its own dates rather than having
+     a due date, and an absent assignee is the right answer for most of them. A
+     batch line marked `routine` must not be nagged for either. */
+  : r.routine
+    ? ['type','time'].filter((_,i)=>![r.type,r.minutes][i])
+    : ['type','repeat','due date','who','time'].filter((_,i)=>![r.type,r.recurrence,r.dueBy,r.assignees?.length,r.minutes][i]);
 
 window.openBatch=k=>{batch={kind:k,text:'',parsed:null,makeVocab:true};draft=null;choreDraft=null;
   if(k==='food') foodSub='batch'; render()};
@@ -1817,15 +2006,19 @@ const recurLabel=c=>c.recurrence==='custom'?`every ${c.interval} days`:({daily:'
 function viewChores(){
   if(batch&&batch.kind==='chores') return viewBatch();
   if(choreDraft) return viewChoreForm();
+  const nRoutines=D.chores.filter(isRoutine).length;
   const nOpen=routineOpenNow().length;
+  /* The toggle only exists once there is something to toggle — a chip that hides
+     nothing is a chip that has to be explained. `+ Add routine` is what makes
+     them discoverable before then. */
   const sub=`<div class="subbar">
-    <button class="chip ${choreView==='tasks'?'on':''}" onclick="setChoreView('tasks')">What's next</button>
-    <button class="chip ${choreView==='routines'?'on':''}" onclick="setChoreView('routines')">Routines${nOpen?` · ${nOpen}`:''}</button>
+    ${nRoutines?`<button class="chip ${showRoutines?'on':''}" onclick="toggleRoutines()"
+      aria-pressed="${showRoutines}">${showRoutines?'Hide':'Show'} routines${nOpen?` · ${nOpen}`:''}</button>`:''}
     <button class="chip" onclick="newChore()">+ Add chore</button>
+    <button class="chip" onclick="newRoutine()">+ Add routine</button>
     <button class="chip" onclick="openBatch('chores')">≡ Batch add</button>
     <button class="chip" onclick="showHistory()">History</button>
   </div>`;
-  if(choreView==='routines') return sub+viewRoutines();
   if(D.chores.length===0) return sub+`<div class="empty card"><p><strong>No chores yet.</strong></p>
     <p>Tap <b>+ Add chore</b> to set one up.</p></div>`;
   const types=[...new Set(D.chores.map(c=>c.type).filter(Boolean))];
@@ -1874,21 +2067,51 @@ function viewChores(){
     ${filtersOpen?`<div class="bulkbody">${inner}</div>`:''}</div>`;
 
   let list=D.chores.filter(choreMatches);
-  /* Three tiers: dated (by urgency), then undated, then someday. Someday is
-     always last even when marked priority — "priority someday" means "when we
-     get to it, do this one first", not "do it now". */
+  const rocc=routineRows();
+  /* One list, one sort. Three tiers: dated (by urgency), then undated, then
+     someday. Someday is always last even when marked priority — "priority
+     someday" means "when we get to it, do this one first", not "do it now".
+     A routine occurrence is dated — it belongs to a specific day — so it lands
+     in tier 0 among the dated chores rather than in a tier of its own. That is
+     the whole point: it is sorted by the same urgency as everything else. */
   const tier=c=>isSomeday(c)?2:(hasRealDate(c.dueBy)?0:1);
-  list.sort((a,b)=>
-    tier(a)-tier(b)
-    || (!!b.priority-!!a.priority)
-    || ((daysUntil(a.dueBy)??9e9)-(daysUntil(b.dueBy)??9e9))
-    || String(a.title||'').localeCompare(String(b.title||''))
+  const rows=[
+    ...list.map(c=>({html:choreCard(c),tier:tier(c),pri:!!c.priority,
+      days:daysUntil(c.dueBy)??9e9,title:String(c.title||''),slot:0})),
+    /* slot breaks the tie between two occurrences of the same routine on the
+       same day, so Breakfast stays above Dinner instead of sorting by name. */
+    ...rocc.map(o=>({html:routineCard(o),tier:0,pri:!!o.c.priority,
+      days:daysUntil(o.iso)??0,title:String(o.c.title||''),slot:o.i})),
+  ];
+  rows.sort((a,b)=>
+    a.tier-b.tier
+    || (b.pri-a.pri)
+    || (a.days-b.days)
+    || a.title.localeCompare(b.title)
+    || a.slot-b.slot
   );
-  const body=list.length?list.map(choreCard).join('')
+  /* Hidden routines have to be named here, or a short list reads as a bug. The
+     count is outstanding occurrences, not routines — two routines can easily be
+     six ticks — so the wording says "outstanding" rather than implying six
+     separate routines exist. */
+  const hiddenNote=(!showRoutines&&nOpen)
+    ? `<p class="suggest">Routines hidden · ${nOpen} still outstanding.</p>`:'';
+  const rnote=rocc.length
+    ? `<p class="suggest">Routines come back tomorrow rather than being crossed off for good.
+       Anything nobody ticks closes itself the day after, so they will not pile up — and a
+       closed-by-itself routine credits no one and counts toward no streak or prize.</p>`:'';
+  const body=rows.length?rows.map(r=>r.html).join('')
     :`<div class="empty card"><p><strong>Nothing matches.</strong></p>
        <p>Try widening one of the filters above — most often it is the time bucket,
-       since chores with no estimate are hidden by it.</p></div>`;
-  return sub+filters+bulkBar(list)+body;
+       since chores with no estimate are hidden by it.${
+         !showRoutines&&nRoutines?' Routines are hidden too.':''}</p></div>`;
+  /* Bulk edit changes a chore's pattern, and there is nothing to change about a
+     single breakfast — so routines step out while picking rather than sitting
+     there unpickable next to pickable rows. Saying so beats them just vanishing. */
+  const bulkNote=(bulkOpen&&showRoutines&&nRoutines)
+    ? `<p class="suggest">Routines are out of the list while you pick — a bulk edit changes the
+       chore behind them, which is done from <b>Edit</b> on the routine itself.</p>`:'';
+  return sub+filters+bulkBar(list)+bulkNote+hiddenNote+body+rnote;
 }
 const anyChoreFilter=()=>!!(choreFilterType||choreFilterWho||choreFilterTime||choreFilterArea||choreFilterDue||choreFilterPri||choreGapsOnly);
 function choreMatches(c){
@@ -1913,7 +2136,6 @@ function choreMatches(c){
   }
   return true;
 }
-window.setChoreView=v=>{choreView=v;choreSel.clear();bulkOpen=false;render()};
 window.filterType=t=>{choreFilterType=choreFilterType===t?null:t;render()};
 window.filterWho=w=>{choreFilterWho=choreFilterWho===w?null:w;render()};
 window.filterArea=a=>{choreFilterArea=choreFilterArea===a?null:a;render()};
@@ -1942,8 +2164,10 @@ function viewChoreForm(){
         <div class="chiprow">
           <button class="chip ${c.routine?'on':''}" onclick="cdRoutine(true)">Routine</button>
           <button class="chip ${!c.routine?'on':''}" onclick="cdRoutine(false)">One-off or scheduled task</button></div>
-        <p class="suggest">A routine stays off the task list and shows on its own page instead.
-        Anything nobody ticks closes itself the next day rather than piling up.</p></div>
+        <p class="suggest">A routine sits in the chore list like anything else, but repeats instead of
+        being crossed off — and can be hidden with one tap when you want only the one-offs.
+        Anything nobody ticks closes itself the next day rather than piling up.
+        Assigning it is optional: it says whose job it usually is, not who has to tick it.</p></div>
       ${c.routine?`
       <div><div class="micro" style="margin-bottom:8px">Which days?</div>
         <div class="chiprow">${ROUTINE_PRESETS.map((p,i)=>
@@ -2028,7 +2252,7 @@ window.openChore=id=>{
               esc(slot||'Tick off')}${st==='done'?' ✓':''}</button>`
           : '';
       }).join('')||`<span style="color:var(--muted)">Not scheduled today.</span>`}</div>
-      <p class="suggest">Routines are ticked per day on the Routines page, so their history stays
+      <p class="suggest">Routines are ticked per day from the chore list, so their history stays
       per-occurrence rather than collapsing into one "last done".</p></section>`
       :`<section class="block card"><h3>Mark done by</h3>
       <div class="chiprow">${D.members.length?D.members.map(m=>
@@ -2040,7 +2264,10 @@ window.openChore=id=>{
     ${hist.length?`<div class="guide"><span class="micro">Recent</span>${hist.map(h=>
       `<p style="margin-top:6px">${esc(h.by||'someone')} · ${fmtDate(h.at)}</p>`).join('')}</div>`:''}
     <div class="actions">
-      ${isRoutine(c)?`<button class="btn" onclick="closeSheet();setChoreView('routines')">See routine</button>`
+      ${isRoutine(c)
+        /* Reschedule is meaningless for a rhythm. The only thing worth offering
+           here is a way back to a list this routine has been hidden from. */
+        ?(showRoutines?'':`<button class="btn" onclick="closeSheet();toggleRoutines()">Show on the list</button>`)
         :`<button class="btn" onclick="openReschedule(${id})">Reschedule</button>`}
       <button class="btn" onclick="editChore(${id})">Edit</button>
       <button class="btn ${c.needsHelp?'primary':''}" onclick="toggleFlag(${id},'needsHelp')">${c.needsHelp?'Clear needs-help':'Needs help'}</button>
@@ -3055,11 +3282,13 @@ function parseCSV(text){
   if(cur||row.length){row.push(cur);rows.push(row)}
   return rows.filter(r=>r.some(c=>c.trim()!==''));
 }
-function download(name,text){
-  const blob=new Blob([text],{type:'text/csv'});
+function downloadBlob(name,blob){
   const url=URL.createObjectURL(blob), a=document.createElement('a');
   a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();
   setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+function download(name,text){
+  downloadBlob(name,new Blob([text],{type:'text/csv'}));
 }
 window.exportTable=key=>{
   const t=TABLES[key];
@@ -3074,6 +3303,187 @@ window.templateFor=key=>{
   const t=TABLES[key];
   download(`template-${key}.csv`, toCSV([t.cols,t.ex]));
   toast('Template downloaded');
+};
+/* ---------- full backup: every store as JSON, plus the media bytes ---------- */
+/* Open item #1: photos, voice memos, drawings, member faces and prize contents
+   are the only data on this device with no copy anywhere else. Sync deliberately
+   never carries them (invariant #3) and the CSV exporter has no column that
+   could hold a blob, so neither existing path can back them up. This writes ONE
+   archive holding both halves: data.json for the records, media/ for the bytes
+   those records point at.
+
+   WHY a hand-rolled zip: a CDN is forbidden (invariant #1) and JSZip is ~90 KB
+   of dependency for one screen. Every entry is STORED rather than deflated —
+   JPEG, PNG and webm are already compressed, so deflate would burn seconds to
+   save almost nothing, and a stored entry reads back with a slice instead of an
+   inflate. There is no zip64 support here; the guards below refuse to write
+   rather than emit an archive that unzips to garbage. */
+const ZIP_MAX_BYTES=0xFFFFFFFF, ZIP_MAX_ENTRIES=0xFFFF;
+
+const CRC_TABLE=(()=>{const t=new Uint32Array(256);
+  for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=(c&1)?(0xEDB88320^(c>>>1)):(c>>>1);t[n]=c>>>0}
+  return t})();
+function crc32(u8){
+  let c=0xFFFFFFFF;
+  for(let i=0;i<u8.length;i++) c=CRC_TABLE[(c^u8[i])&0xFF]^(c>>>8);
+  return (c^0xFFFFFFFF)>>>0;
+}
+
+/* Returns the archive as a list of byte runs rather than one buffer: a household
+   with 200 photos is tens of megabytes, and Blob can reference the parts without
+   copying them. Tests concatenate the list themselves. */
+function zipParts(files){
+  const enc=new TextEncoder(), out=[], central=[];
+  let offset=0;
+  const total=files.reduce((a,f)=>a+f.bytes.length,0);
+  if(files.length>ZIP_MAX_ENTRIES) throw new Error(`too many files for one archive (${files.length})`);
+  if(total>ZIP_MAX_BYTES) throw new Error('backup is larger than 4 GB, which this archive format cannot hold');
+  const d=new Date();
+  /* MS-DOS packed date/time. Seconds have 2-second resolution — that is the
+     format, not a rounding bug. */
+  const stamp=((d.getFullYear()-1980)<<25)|((d.getMonth()+1)<<21)|(d.getDate()<<16)
+    |(d.getHours()<<11)|(d.getMinutes()<<5)|(d.getSeconds()>>1);
+  const u16=(a,i,v)=>{a[i]=v&255;a[i+1]=(v>>>8)&255};
+  const u32=(a,i,v)=>{a[i]=v&255;a[i+1]=(v>>>8)&255;a[i+2]=(v>>>16)&255;a[i+3]=(v>>>24)&255};
+  for(const f of files){
+    const nm=enc.encode(f.name), n=f.bytes.length, crc=crc32(f.bytes);
+    const lh=new Uint8Array(30+nm.length);
+    u32(lh,0,0x04034b50); u16(lh,4,20); u16(lh,6,0x0800);   /* flag bit 11: the name is UTF-8 */
+    u16(lh,8,0);          /* method 0 = stored */
+    u32(lh,10,stamp); u32(lh,14,crc); u32(lh,18,n); u32(lh,22,n);
+    u16(lh,26,nm.length); u16(lh,28,0); lh.set(nm,30);
+    out.push(lh,f.bytes);
+    const ce=new Uint8Array(46+nm.length);
+    u32(ce,0,0x02014b50); u16(ce,4,20); u16(ce,6,20); u16(ce,8,0x0800); u16(ce,10,0);
+    u32(ce,12,stamp); u32(ce,16,crc); u32(ce,20,n); u32(ce,24,n);
+    u16(ce,28,nm.length); u16(ce,30,0); u16(ce,32,0); u16(ce,34,0); u16(ce,36,0);
+    u32(ce,38,0); u32(ce,42,offset); ce.set(nm,46);
+    central.push(ce);
+    offset+=lh.length+n;
+  }
+  const cdSize=central.reduce((a,b)=>a+b.length,0);
+  const end=new Uint8Array(22);
+  u32(end,0,0x06054b50); u16(end,4,0); u16(end,6,0);
+  u16(end,8,central.length); u16(end,10,central.length);
+  u32(end,12,cdSize); u32(end,16,offset); u16(end,20,0);
+  return out.concat(central,[end]);
+}
+const zipBlob=files=>new Blob(zipParts(files),{type:'application/zip'});
+
+/* Unknown types become .bin rather than a guess: a file named .jpg that is not
+   a jpeg is worse than one named .bin (invariant #7). */
+const MEDIA_EXT={'image/png':'png','image/jpeg':'jpg','image/webp':'webp','image/gif':'gif',
+  'audio/webm':'webm','audio/ogg':'ogg','audio/mpeg':'mp3','audio/mp4':'m4a','video/webm':'webm'};
+const extFor=m=>MEDIA_EXT[String(m||'').split(';')[0].trim().toLowerCase()]||'bin';
+/* Filenames are built from store, row id and field path, so they are already
+   tame — this is belt and braces against a zip-slip name reaching a file
+   manager, and it keeps names typeable when someone recovers the archive by hand. */
+const safeSeg=s=>String(s).replace(/[^A-Za-z0-9_-]+/g,'-').replace(/^-+|-+$/g,'').slice(0,80)||'x';
+
+const newSink=()=>({list:[],seen:new Map()});
+/* Walks a record and swaps every Blob for a pointer to a file in the archive.
+   Generic on purpose: hand-listing `avatar`, `parts[].blob` and prize contents is
+   how a future blob field would quietly stop being backed up. */
+function mediaRefs(value,path,sink){
+  if(typeof Blob!=='undefined'&&value instanceof Blob){
+    let hit=sink.seen.get(value);
+    if(!hit){
+      hit={name:`media/${safeSeg(path)}.${extFor(value.type)}`,blob:value};
+      sink.seen.set(value,hit); sink.list.push(hit);
+    }
+    return {__media:hit.name,mime:value.type||'',bytes:value.size};
+  }
+  if(Array.isArray(value)) return value.map((v,i)=>mediaRefs(v,`${path}-${i}`,sink));
+  if(value&&typeof value==='object'&&!(value instanceof Date))
+    return Object.fromEntries(Object.entries(value).map(([k,v])=>[k,mediaRefs(v,`${path}-${k}`,sink)]));
+  return value;
+}
+/* `_dirty` is sync bookkeeping, not household data — restoring it would queue a
+   push of every row in the file. `id` and `uid` stay: they are the only thing a
+   restore could use to tell a row it already has from a new one. */
+const forBackup=rec=>{const {_dirty,...rest}=rec; return rest};
+
+/* Not included, and the archive says so out loud: `library`/`libmeta` are a
+   reference table that comes back from the server or a CSV, and `sync` holds the
+   pull cursor and tombstones, which are true for THIS device only. */
+const BACKUP_EXCLUDES=['library','libmeta','sync'];
+function backupPlan(){
+  const sink=newSink(), stores={}, counts={};
+  for(const s of STORES){
+    stores[s]=(D[s]||[]).map(r=>mediaRefs(forBackup(r),`${s}-${r.id??'x'}`,sink));
+    counts[s]=(D[s]||[]).length;
+  }
+  return {stores,counts,media:sink.list};
+}
+/* What the button is about to write, for the label. Approximate by design: the
+   real number needs every blob read. */
+function backupSize(plan){
+  const {stores,media}=plan||backupPlan();
+  return media.reduce((a,m)=>a+(m.blob.size||0),0)+new Blob([JSON.stringify(stores)]).size;
+}
+
+function backupReadme(man){
+  return [
+    'ADHQ full backup',
+    '',
+    `Written ${man.created} by build ${man.build} (${man.edition} edition).`,
+    `Storage schema v${man.schema}, database "${man.database}".`,
+    '',
+    'WHAT IS IN HERE',
+    '  manifest.json  what this archive is, and how many rows of each kind.',
+    '  data.json      every record, one key per store.',
+    '  media/         the photos, drawings, voice memos and member faces.',
+    '',
+    'HOW THE TWO FIT TOGETHER',
+    '  Anywhere a record held a photo or a recording, data.json has an object',
+    '  like {"__media":"media/messages-4-parts-0-blob.jpg","mime":"image/jpeg",',
+    '  "bytes":51234} instead. Open that path in this archive to get the file.',
+    '  The media files are ordinary jpg/png/webm — any picture viewer or music',
+    '  player opens them directly, with no help from the app.',
+    '',
+    'WHAT IS NOT IN HERE',
+    `  ${man.excluded.join(', ')}. The food library is a reference table that comes`,
+    '  back from the server or a CSV import, and the sync bookkeeping is only',
+    '  true for the device that wrote this file.',
+    man.missing.length
+      ? '\nUNREADABLE\n  These were listed in data.json but could not be read off the device,\n  so there are no bytes for them here:\n'
+        +man.missing.map(n=>'    '+n).join('\n')
+      : '',
+    '',
+    'Keep this file somewhere that is not the tablet. It is the only copy of the',
+    'media; everything else also lives on the server.',
+    '',
+  ].join('\n');
+}
+
+window.exportBackup=async()=>{
+  const {stores,counts,media}=backupPlan();
+  const enc=new TextEncoder();
+  const files=[], missing=[];
+  let mediaBytes=0;
+  for(const m of media){
+    /* One unreadable blob must not cost the whole backup. It gets named in the
+       manifest instead of silently vanishing. */
+    try{
+      const bytes=new Uint8Array(await m.blob.arrayBuffer());
+      files.push({name:m.name,bytes}); mediaBytes+=bytes.length;
+    }catch(e){ missing.push(m.name) }
+  }
+  const manifest={app:'ADHQ',kind:'full-backup',format:1,
+    build:BUILD,schema:DB_VERSION,database:dbName,edition:SYNC.enabled?'Connect':'Local',
+    created:new Date().toISOString(),counts,
+    media:{files:files.length,bytes:mediaBytes},missing,excluded:BACKUP_EXCLUDES};
+  files.unshift(
+    {name:'manifest.json',bytes:enc.encode(JSON.stringify(manifest,null,2))},
+    {name:'data.json',bytes:enc.encode(JSON.stringify(stores))},
+    {name:'README.txt',bytes:enc.encode(backupReadme(manifest))});
+  let blob;
+  try{ blob=zipBlob(files) }
+  catch(e){ return toast(`Backup not written — ${e.message}`,{sticky:true}) }
+  downloadBlob(`adhq-backup-${todayISO()}.zip`,blob);
+  const rows=Object.values(counts).reduce((a,b)=>a+b,0);
+  toast(`Backup written · ${rows} rows · ${files.length-3} media files · ${bytes(blob.size)}`
+    +(missing.length?` · ${missing.length} unreadable, see manifest`:''),{sticky:true});
 };
 function paneLibrary(){
   const meta=(D.libmeta||[]).find(m=>m.kind==='lib');
@@ -3157,8 +3567,20 @@ window.dropLibrary=async()=>{
   await refreshLib(); render(); toast('Reverted to the starter set');
 };
 function paneData(){
-  return `<section class="block card"><h3>Export</h3>
-    <p class="suggest" style="margin:0 0 10px">Files land in the tablet's Downloads folder. Copy them to a USB drive or SD card from the Files app — nothing leaves this device on its own.</p>
+  /* Counted from the plan rather than from D directly, so this label and the
+     archive can never disagree about what is being written. */
+  const plan=backupPlan();
+  const nMedia=plan.media.length, nRows=Object.values(plan.counts).reduce((a,b)=>a+b,0);
+  return `<section class="block card"><h3>Full backup</h3>
+    <p class="suggest" style="margin:0 0 10px">One <b>.zip</b> holding every record <i>and</i> the photos, drawings, voice memos and member faces.
+    ${nMedia?`Those ${nMedia} media file${nMedia===1?'':'s'} exist${nMedia===1?'s':''} nowhere else — not on the server, not in a CSV. This is the only way to get ${nMedia===1?'it':'them'} off the tablet.`
+      :'There are no photos or recordings on this device yet, so right now this is the same data the CSV files hold — but it stays the right button once there are.'}</p>
+    <div class="addrow"><button class="btn primary" onclick="exportBackup()">Back up everything${nMedia?` · ${bytes(backupSize(plan))}`:''}</button></div>
+    <p class="suggest" style="margin:10px 0 0">${nRows} row${nRows===1?'':'s'} across ${STORES.length} lists${nMedia?` · ${nMedia} media file${nMedia===1?'':'s'}`:''}.
+    The archive holds ordinary jpg/png/webm files and a readme, so it can be opened and read without this app. The food library is left out — it comes back from the server or a CSV.</p>
+  </section>
+  <section class="block card"><h3>Export</h3>
+    <p class="suggest" style="margin:0 0 10px">One table at a time, as CSV, for editing on a computer. <b>CSV cannot carry photos or recordings</b> — use the full backup above for those. Files land in the tablet's Downloads folder. Copy them to a USB drive or SD card from the Files app — nothing leaves this device on its own.</p>
     <div class="chiprow">${Object.keys(TABLES).map(k=>
       `<button class="chip" onclick="exportTable('${k}')">${k.replace(/_/g,' ')}</button>`).join('')}</div>
     <div class="addrow"><button class="btn primary" onclick="exportAll()">Export everything</button></div>
