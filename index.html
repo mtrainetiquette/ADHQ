@@ -103,6 +103,17 @@
   .menutile .mico{font-size:44px;line-height:1}
   .menutile .mlabel{font-size:19px;font-weight:800}
   .menutile .msub{font-size:13px;color:var(--muted);font-weight:600;text-align:center}
+  /* 16:9 without a magic pixel height, so it works on a phone and a tablet */
+  .vidwrap{position:relative;width:100%;aspect-ratio:16/9;margin:10px 0 14px;
+    border-radius:12px;overflow:hidden;background:#000;border:1px solid var(--line)}
+  .vidwrap iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
+  .rich{line-height:1.55}
+  .rich h4{font-size:15px;font-weight:800;margin:14px 0 6px;letter-spacing:.01em}
+  .rich p{margin:8px 0}
+  .rich ul{margin:8px 0 8px 20px}
+  .rich li{margin:4px 0}
+  .rich a{color:var(--accent);text-decoration:underline}
+  .rich strong{font-weight:800}
   .needs{display:inline-block;margin-left:8px;padding:1px 7px;border-radius:999px;
     font-size:11px;font-weight:700;background:var(--panel-2);color:var(--muted);
     border:1px solid var(--line);vertical-align:middle}
@@ -161,7 +172,7 @@
   .addrow{display:flex;gap:8px;margin-top:12px}
   .addrow .field{flex:1}
 
-  .itemcard{display:flex;align-items:center;gap:14px;width:100%;text-align:left;padding:12px 14px;min-height:72px}
+  .itemcard{display:flex;align-items:flex-start;gap:14px;width:100%;text-align:left;padding:12px 14px;min-height:72px}
   .itemcard + .itemcard{margin-top:8px}
   .days{flex:0 0 62px;height:62px;border-radius:14px;display:flex;flex-direction:column;
     align-items:center;justify-content:center;font-variant-numeric:tabular-nums;
@@ -174,8 +185,12 @@
   .days.late b{color:var(--late)}
   .days.none b{color:var(--muted);font-size:18px}
   .iteminfo{flex:1;min-width:0}
-  .iteminfo .nm{font-size:18px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .iteminfo .meta{color:var(--muted);font-size:14px;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  /* Wrap, do not truncate. A clipped title hides the end of the sentence, and on
+     a phone that was eating the due date and the room as well. Cards grow
+     instead; min-height keeps short ones from looking thin. */
+  .iteminfo .nm{font-size:18px;font-weight:700;overflow-wrap:anywhere;word-break:break-word}
+  .iteminfo .meta{color:var(--muted);font-size:14px;margin-top:2px;overflow-wrap:anywhere}
+  .itemcard>.daychip,.itemcard>.pick,.itemcard>.days{margin-top:2px}
   .grouphead{padding:18px 6px 8px}
   .flags{display:flex;gap:6px;margin-top:4px;flex-wrap:wrap}
   .flag{font-size:11px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;
@@ -218,7 +233,7 @@
     display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:800}
   .shoprow.done .tick{background:var(--fresh);border-color:var(--fresh);color:#0c2416}
   .shoprow.done .nm{text-decoration:line-through;color:var(--muted)}
-  .shoprow .nm,.listrow .nm{flex:1;text-align:left;font-weight:600}
+  .shoprow .nm,.listrow .nm{flex:1;text-align:left;font-weight:600;overflow-wrap:anywhere}
   .listrow .cnt{color:var(--muted);font-size:14px;font-variant-numeric:tabular-nums}
 
   .streak{display:flex;align-items:center;gap:10px;padding:10px 14px;min-height:var(--tap)}
@@ -250,7 +265,7 @@
   .partrow{display:flex;align-items:center;gap:10px;padding:8px 10px;background:var(--panel-2);
     border-radius:10px;margin-top:6px}
   .partrow .ic{font-size:20px}
-  .partrow .nm{flex:1;font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .partrow .nm{flex:1;font-size:15px;overflow-wrap:anywhere}
   .toolrow{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
   .composer .modes{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:10px 0}
   .composer .modes .chip{justify-content:center;display:flex;min-height:var(--tap)}
@@ -322,7 +337,7 @@
   </header>
   <main id="main"></main>
   <nav class="tabs" aria-label="Main sections"><div class="row">
-    <button data-tab="menu" class="on"><span class="ico" aria-hidden="true">🏠</span>Menu</button>
+    <button data-tab="menu" class="on"><span class="ico" aria-hidden="true">🏠</span>Dashboard</button>
     <button data-tab="food"><span class="ico" aria-hidden="true">🥘</span>Food<span class="n" id="nFood" aria-hidden="true">0</span><span class="sr" id="nFoodSR"></span></button>
     <button data-tab="chores"><span class="ico" aria-hidden="true">🪴</span>Chores<span class="n" id="nChores" aria-hidden="true">0</span><span class="sr" id="nChoresSR"></span></button>
     <button data-tab="habits"><span class="ico" aria-hidden="true">📈</span>Habits</button>
@@ -532,7 +547,7 @@ const SERIES=['#f5c84c','#5fd08a','#6fb3e8','#b98ae0','#f0a35e','#e8646a','#7fd9
    SYNC.enabled=true   -> Connected edition. Structured text only, never blobs. */
 /* Shown in Setup -> Storage and under the menu. Bump on every hand-off.
    Eight rounds of "is this the new file?" is eight rounds too many. */
-const BUILD='2026-08-09 · r9';
+const BUILD='2026-08-09 · r11';
 
 const SYNC={
   enabled:true,
@@ -544,12 +559,12 @@ const SYNC={
      the device in either edition. `members` syncs the name only — the
      avatar blob is stripped on the way out (see scrub()). */
   stores:['items','categories','shopping','common','members','chores',
-          'choreTypes','choreHistory','habits','habitLogs','stores','locations','areas'],
+          'choreTypes','choreHistory','habits','habitLogs','stores','locations','areas','recipes','routineLogs'],
 };
 const syncable=s=>SYNC.enabled&&SYNC.stores.includes(s);
 
 /* ---------- IndexedDB ---------- */
-const STORES=['items','categories','shopping','common','members','chores','choreTypes','choreHistory','habits','habitLogs','messages','stores','prizes','locations','areas'];
+const STORES=['items','categories','shopping','common','members','chores','choreTypes','choreHistory','habits','habitLogs','messages','stores','prizes','locations','areas','recipes','routineLogs'];
 let db, dbName='adhq';
 
 /* A SECOND, tiny database that holds only the session and the household->database
@@ -602,7 +617,7 @@ async function dbNameFor(uid){
    the previous build (TRANSFER.md invariant #5).
    The self-heal below means forgetting again is no longer fatal — but bump it
    anyway, because the heal costs an extra open. */
-const DB_VERSION=8;
+const DB_VERSION=10;
 const AUX_STORES=['library','libmeta','sync'];   /* outside STORES on purpose */
 
 function idbOpen(name,version){
@@ -705,7 +720,7 @@ let tab='menu', foodSub='list', sortMode='soonest', draft=null, foodSearch='';
 let choreFilterType=null, choreFilterWho=null, choreDraft=null;
 let batch=null, foodGapsOnly=false, choreGapsOnly=false;
 let choreFilterTime=null, choreFilterArea=null, choreFilterDue=null, choreFilterPri=false;
-let choreSel=new Set(), bulkOpen=false, filtersOpen=false;
+let choreSel=new Set(), bulkOpen=false, filtersOpen=false, choreView='tasks';
 let habitMember=null, habitGraphMode='habit', habitDate=null;
 let settingsPane='members';
 
@@ -838,8 +853,16 @@ const DAY=86400000;
 const fmtDate=ts=>new Date(ts).toLocaleDateString(undefined,{month:'short',day:'numeric'});
 const todayISO=()=>{const d=new Date();d.setHours(12,0,0,0);return d.toISOString().slice(0,10)};
 const isoPlus=n=>{const d=new Date(Date.now()+n*DAY);d.setHours(12,0,0,0);return d.toISOString().slice(0,10)};
+/* "Someday" — worth doing, no timeline. Stored as the literal string 'someday'
+   in dueBy rather than a far-future date, because a sentinel date lies: it would
+   show as "in 3650 days", land in a Next-7-days window the moment someone edits
+   it, and become a real overdue chore in ten years.
+   The rule everything else follows: someday sorts LAST, always. */
+const SOMEDAY='someday';
+const isSomeday=c=>c?.dueBy===SOMEDAY;
+const hasRealDate=v=>!!v&&v!==SOMEDAY;
 function daysUntil(iso){
-  if(!iso) return null;
+  if(!iso||iso===SOMEDAY) return null;
   const t=new Date();t.setHours(0,0,0,0);
   const e=new Date(iso+'T00:00:00');
   return Math.round((e-t)/DAY);
@@ -906,11 +929,11 @@ function memberFace(name,compact){
 
 /* ---------- render ---------- */
 function render(){
-  const overdue=D.chores.filter(c=>(daysUntil(c.dueBy)??99)<0).length;
+  const overdue=D.chores.filter(c=>!isRoutine(c)&&hasRealDate(c.dueBy)&&(daysUntil(c.dueBy)??99)<0).length;
   $('#nFood').textContent=D.items.length;
   $('#nShop').textContent=D.shopping.filter(s=>!s.done).length;
   const nc=$('#nChores');
-  const dueNow=D.chores.filter(c=>(daysUntil(c.dueBy)??99)<=0).length;
+  const dueNow=D.chores.filter(c=>!isRoutine(c)&&hasRealDate(c.dueBy)&&(daysUntil(c.dueBy)??99)<=0).length;
   nc.textContent=dueNow; nc.classList.toggle('alert',overdue>0);
   /* a11y: badges are aria-hidden numerals; these give them spoken context. */
   const say=(id,n,noun)=>{const e=$(id); if(e) e.textContent=n?`, ${n} ${noun}${n===1?'':'s'}`:'';};
@@ -946,7 +969,10 @@ function render(){
 /* Derived, never stored — same reasoning as prize milestones (TRANSFER.md §4).
    Filling a blank in makes the tag disappear on its own. */
 const itemGaps=it=>[!it.category&&'category',!it.location&&'place',!it.eatBy&&'eat-by'].filter(Boolean);
-const choreGaps=c=>[!c.type&&'type',!c.dueBy&&'due date',!(c.assignees||[]).length&&'who',!(+c.minutes>0)&&'time estimate'].filter(Boolean);
+/* A routine has no due date or assignee by design, so those are not gaps for it. */
+const choreGaps=c=>isRoutine(c)
+  ? [!c.type&&'type',!(+c.minutes>0)&&'time estimate'].filter(Boolean)
+  : [!c.type&&'type',!c.dueBy&&'due date',!(c.assignees||[]).length&&'who',!(+c.minutes>0)&&'time estimate'].filter(Boolean);
 const gapTag=g=>g.length?`<span class="needs">needs details</span>`:'';
 function itemCard(it){
   const meta=[it.category,it.location,it.container,it.eatBy?'eat by '+fmtDate(it.eatBy+'T12:00:00'):null].filter(Boolean).join(' · ');
@@ -973,7 +999,11 @@ function viewFood(){
     <button class="chip ${foodSub==='list'?'on':''}" onclick="setSub('list')">What's stored</button>
     <button class="chip ${foodSub==='add'?'on':''}" onclick="setSub('add')">+ Add food</button>
     <button class="chip" onclick="openBatch('food')">≡ Batch add</button>
+    <button class="chip ${foodSub==='recipes'?'on':''}" onclick="setSub('recipes')">📖 Recipes</button>
   </div>`;
+  if(foodSub==='recipes') return sub
+    +(recipeDraft||recipeOpen!=null?'':`<div class="subbar"><button class="chip" onclick="newRecipe()">+ New recipe</button></div>`)
+    +viewRecipes();
   if(foodSub==='add') return sub+viewAdd();
   if(D.items.length===0) return sub+`<div class="empty card"><p><strong>Nothing logged yet.</strong></p>
     <p>Tap <b>+ Add food</b> to log the first thing — fridge, freezer, pantry, counter, cabinet, or basement.
@@ -1006,7 +1036,7 @@ function viewFood(){
   }
   return sub+search+bar+body;
 }
-window.setSub=s=>{foodSub=s;draft=null;batch=null;foodSearch='';render()};
+window.setSub=s=>{foodSub=s;draft=null;batch=null;foodSearch='';recipeDraft=null;recipeOpen=null;render()};
 window.toggleFoodGaps=()=>{foodGapsOnly=!foodGapsOnly;render()};
 window.setSort=m=>{sortMode=m;render()};
 
@@ -1140,7 +1170,7 @@ function choreCard(c){
   const d=daysUntil(c.dueBy);
   const who=(c.assignees||[]).join(', ');
   const meta=[c.type,c.area,c.minutes>0?minsLabel(c.minutes):null,
-    c.dueBy?'due '+fmtDate(c.dueBy+'T12:00:00'):'no due date',
+    isRoutine(c)?routineWhen(c):dueLabel(c),
     c.recurrence&&c.recurrence!=='none'?recurLabel(c):null].filter(Boolean).join(' · ');
   const flags=[
     c.priority?'<span class="flag pri">Priority</span>':'',
@@ -1157,7 +1187,311 @@ function choreCard(c){
       ${flags?`<span class="flags">${flags}</span>`:''}</span>
   </button>`;
 }
+/* one phrasing of a due date, used by the card, the sheet and the bulk toast */
+const routineWhen=c=>{
+  const days=(c.rdays||[]).length?c.rdays.map(n=>WEEKDAYS[n][1]).join(', ')
+    :(+c.interval>1?`every ${c.interval} days`:'every day');
+  const times=(c.slots||[]).length?` · ${c.slots.join(', ')}`:'';
+  return `routine · ${days}${times}`;
+};
+const dueLabel=c=>isSomeday(c)?'someday':(c.dueBy?'due '+fmtDate(c.dueBy+'T12:00:00'):'no due date');
 const minsLabel=m=>m>=120?`${(m/60).toFixed(m%60?1:0)} hr`:m>=60?`${(m/60).toFixed(m%60?1:0)} hr`:`${m} min`;
+
+/* ===================== ROUTINES =====================
+   Feeding the cat twice a day is not a task, it is a rhythm. The list of things
+   that are DIFFERENT about today is the valuable thing, and a rhythm repeated
+   every morning drowns it.
+
+   Occurrences are DERIVED from the chore, never stored. There is no row per
+   breakfast. That is what makes the auto-close requirement cheap: an occurrence
+   nobody ticked simply reads as lapsed once its grace period passes. The
+   alternative — a background job writing "done" rows — would need the tablet to
+   be awake, would invent history nobody performed, and would sync that fiction
+   to every device. Nothing is written unless a person actually taps a name.
+
+   Consequence worth stating: a lapsed occurrence is NOT in choreHistory, so it
+   credits nobody, feeds no streak and counts toward no prize. Auto-closing
+   clears the screen; it does not claim the work was done.
+   =================================================== */
+const WEEKDAYS=[['0','Sun'],['1','Mon'],['2','Tue'],['3','Wed'],['4','Thu'],['5','Fri'],['6','Sat']];
+const ROUTINE_PRESETS=[
+  {label:'Every day',        rdays:[],        interval:1},
+  {label:'Every other day',  rdays:[],        interval:2},
+  {label:'Weekdays',         rdays:[1,2,3,4,5]},
+  {label:'Weekends',         rdays:[0,6]},
+  {label:'Tue & Fri',        rdays:[2,5]},
+];
+const SLOT_PRESETS=[
+  {label:'Once a day',            slots:[]},
+  {label:'Breakfast & dinner',    slots:['Breakfast','Dinner']},
+  {label:'Three meals',           slots:['Breakfast','Lunch','Dinner']},
+  {label:'Morning & evening',     slots:['Morning','Evening']},
+];
+const isRoutine=c=>!!c?.routine;
+const rslots=c=>(Array.isArray(c.slots)&&c.slots.length?c.slots:['']);
+const isoOf=n=>isoPlus(n);
+const dowOf=iso=>new Date(iso+'T12:00:00').getDay();
+
+/* Is this routine active on this date? */
+function routineActive(c,iso){
+  if(Array.isArray(c.rdays)&&c.rdays.length) return c.rdays.includes(dowOf(iso));
+  const n=+c.interval>1?+c.interval:1;
+  if(n===1) return true;
+  const anchor=c.ranchor||(c.created?new Date(c.created).toISOString().slice(0,10):iso);
+  const diff=Math.round((new Date(iso+'T12:00:00')-new Date(anchor+'T12:00:00'))/DAY);
+  return ((diff%n)+n)%n===0;
+}
+const rkey=(c,iso,i)=>`${c.id}|${iso}|${i}`;
+const rlog=(c,iso,i)=>(D.routineLogs||[]).find(l=>l.key===rkey(c,iso,i));
+
+/* GRACE_DAYS=1: an occurrence for today can still be ticked tomorrow. Once the
+   whole of the next day has passed it lapses on its own. */
+const GRACE_DAYS=1;
+function rStatus(c,iso,i){
+  if(rlog(c,iso,i)) return 'done';
+  const age=-(daysUntil(iso)??0);            /* days since that date */
+  if(age>GRACE_DAYS) return 'lapsed';
+  if(age>0) return 'late';                   /* yesterday, still tickable */
+  return 'open';
+}
+function routineDay(iso){
+  const out=[];
+  for(const c of D.chores.filter(isRoutine)){
+    if(!routineActive(c,iso)) continue;
+    rslots(c).forEach((slot,i)=>out.push({c,iso,i,slot,status:rStatus(c,iso,i),log:rlog(c,iso,i)}));
+  }
+  return out;
+}
+/* What is still outstanding right now: today, plus yesterday inside its grace. */
+const routineOpenNow=()=>[...routineDay(isoOf(-1)),...routineDay(isoOf(0))]
+  .filter(o=>o.status==='open'||o.status==='late');
+
+window.tickRoutine=async(id,iso,i,who)=>{
+  const c=D.chores.find(x=>x.id===id); if(!c)return;
+  const slot=rslots(c)[i]??'';
+  const existing=rlog(c,iso,i);
+  if(existing){ await del('routineLogs',existing.id); await reload('routineLogs'); render();
+    return toast(`${c.title}${slot?' · '+slot:''} — unticked`); }
+  await put('routineLogs',{key:rkey(c,iso,i),choreId:id,date:iso,slot,by:who||'',at:Date.now()});
+  /* Routines also land in the normal history, so "who fed the cat" is answerable
+     and streaks work. Lapsed ones never do — nobody gets credit for those. */
+  await put('choreHistory',{choreId:id,title:c.title+(slot?' · '+slot:''),type:c.type,by:who||'',at:Date.now(),routine:true});
+  await reload('routineLogs','choreHistory'); closeSheet(); render();
+  toast(`${c.title}${slot?' · '+slot:''} done${who?' by '+who:''}`);
+};
+window.openRoutineTick=(id,iso,i)=>{
+  const c=D.chores.find(x=>x.id===id); if(!c)return;
+  const slot=rslots(c)[i]??'', st=rStatus(c,iso,i), lg=rlog(c,iso,i);
+  showSheet(`<h2>${esc(c.title)}${slot?` · ${esc(slot)}`:''}</h2>
+    <p class="sub">${esc(fmtDate(iso+'T12:00:00'))}${st==='late'?' · yesterday, still open':''}</p>
+    ${lg?`<section class="block card"><h3>Already done</h3>
+        <p class="suggest">${esc(lg.by||'no one recorded')} · ${fmtDate(lg.at)}</p>
+        <div class="actions"><button class="btn" onclick="tickRoutine(${id},${q(iso)},${i})">Undo</button></div></section>`
+      :`<section class="block card"><h3>Who did it?</h3><div class="chiprow">
+        ${D.members.map(m=>`<button class="chip big" onclick="tickRoutine(${id},${q(iso)},${i},${q(m.name)})">${memberFace(m.name,false)}</button>`).join('')}
+        <button class="chip big" onclick="tickRoutine(${id},${q(iso)},${i},'Someone else')">Someone else</button>
+      </div></section>`}
+    <div class="actions">
+      <button class="btn" onclick="openChore(${id})">About this routine</button>
+      <button class="btn ghost" onclick="closeSheet()">Close</button></div>`);
+};
+
+let routineDays=1;                         /* 1 = today, 7 = the week ahead */
+window.setRoutineDays=n=>{routineDays=n;render()};
+function viewRoutines(){
+  const live=D.chores.filter(isRoutine);
+  if(!live.length) return `<div class="empty card">
+    <p><strong>No routines yet.</strong></p>
+    <p>A routine is something that repeats so often it should not be on your task list —
+    feeding the cat, meal prep, bins on Tuesday. Mark any chore as a routine from
+    <b>Edit</b>, or add one now.</p>
+    <div class="actions"><button class="btn primary" onclick="newRoutine()">Add a routine</button></div></div>`;
+  const dayBlock=(iso,label)=>{
+    const rows=routineDay(iso);
+    if(!rows.length) return '';
+    return `<section class="block card"><h3>${esc(label)}</h3>
+      ${rows.map(o=>{
+        const cls={done:'fresh',open:'none',late:'soon',lapsed:'late'}[o.status];
+        const mark={done:'✓',open:'',late:'!',lapsed:'–'}[o.status];
+        const note=o.status==='done'?(o.log.by||'done'):o.status==='lapsed'?'closed itself':o.status==='late'?'still open':'';
+        return `<button class="itemcard card" onclick="openRoutineTick(${o.c.id},${q(iso)},${o.i})">
+          <span class="daychip ${cls}">${mark}</span>
+          <span class="iteminfo"><span class="nm">${esc(o.c.title)}${o.slot?` · ${esc(o.slot)}`:''}</span>
+            <span class="meta">${esc([note,o.c.area,o.c.minutes>0?minsLabel(o.c.minutes):null].filter(Boolean).join(' · '))}</span></span>
+        </button>`;
+      }).join('')}</section>`;
+  };
+  const yesterday=routineDay(isoOf(-1)).some(o=>o.status==='late')?dayBlock(isoOf(-1),'Yesterday · still open'):'';
+  const days=routineDays===1?[[0,'Today']]
+    :Array.from({length:7},(_,n)=>[n,n===0?'Today':n===1?'Tomorrow':fmtDate(isoOf(n)+'T12:00:00')]);
+  return `<div class="subbar">
+      <button class="chip ${routineDays===1?'on':''}" onclick="setRoutineDays(1)">Today</button>
+      <button class="chip ${routineDays===7?'on':''}" onclick="setRoutineDays(7)">Next 7 days</button>
+      <button class="chip" onclick="newRoutine()">+ Add routine</button></div>
+    ${yesterday}
+    ${days.map(([n,label])=>dayBlock(isoOf(n),label)).join('')}
+    <p class="suggest">Anything nobody ticks closes itself the day after — it will not pile up.
+    A closed-by-itself routine credits no one and counts toward no streak or prize.</p>`;
+}
+window.newRoutine=()=>{choreDraft={title:'',type:null,area:null,minutes:null,routine:true,
+  slots:[],rdays:[],interval:1,ranchor:todayISO(),recurrence:'none',checkIn:'',dueBy:'',
+  notes:'',assignees:[],priority:false,needsHelp:false};choreView='tasks';render()};
+
+/* ===================== RECIPES =====================
+   Formatting is stored as MARKDOWN-ish text, not HTML. Storing HTML would mean
+   either trusting it on the way out (an injection route in an app children use)
+   or sanitising it properly, which is a real library. Marking up a small,
+   fixed set of characters and rendering them through esc() is both safer and
+   smaller, and it keeps recipes plain enough for CSV backup to carry them.
+
+   Videos are stored as URLs and embedded only for hosts with a known, stable
+   privacy-preserving embed. Everything else stays a plain link — an <iframe>
+   pointing at an arbitrary URL is a tracking surface and a layout hazard.
+   ================================================== */
+const VIDEO_HOSTS=[
+  /* youtube-nocookie: same player, no cookie until playback */
+  {re:/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/shorts\/)([\w-]{6,20})/,
+   embed:id=>`https://www.youtube-nocookie.com/embed/${id}`, name:'YouTube'},
+  {re:/vimeo\.com\/(\d{6,12})/, embed:id=>`https://player.vimeo.com/video/${id}`, name:'Vimeo'},
+];
+/* TikTok and Instagram are deliberately NOT embedded: their embeds load a
+   tracking script into the page, and Instagram's blocks non-logged-in views
+   anyway. A link opens the app, which is what people want on a tablet. */
+function videoEmbed(url){
+  if(!/^https:\/\//i.test(url||'')) return null;
+  for(const h of VIDEO_HOSTS){ const m=url.match(h.re); if(m) return {src:h.embed(m[1]),name:h.name}; }
+  return null;
+}
+const linkHost=u=>{ try{ return new URL(u).hostname.replace(/^www\./,''); }catch{ return u; } };
+const safeUrl=u=>/^https?:\/\//i.test(String(u||'').trim())?String(u).trim():null;
+
+/* **bold** *italic* # heading - bullet, plus bare URLs. Escaped FIRST, so no
+   input can introduce a tag. */
+function richText(src){
+  const lines=String(src||'').split('\n');
+  let out='',inList=false;
+  const inline=s=>esc(s)
+    .replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>')
+    .replace(/(^|[^*])\*([^*\n]+)\*/g,'$1<em>$2</em>')
+    .replace(/(https?:\/\/[^\s<]+)/g,(m)=>`<a href="${m}" target="_blank" rel="noopener noreferrer nofollow">${linkHost(m)}</a>`);
+  for(const raw of lines){
+    const l=raw.trim();
+    const bullet=/^[-*•]\s+(.*)$/.exec(l);
+    if(bullet){ if(!inList){out+='<ul>';inList=true;} out+=`<li>${inline(bullet[1])}</li>`; continue; }
+    if(inList){ out+='</ul>'; inList=false; }
+    if(!l){ continue; }
+    const head=/^(#{1,3})\s+(.*)$/.exec(l);
+    if(head){ out+=`<h4>${inline(head[2])}</h4>`; continue; }
+    out+=`<p>${inline(l)}</p>`;
+  }
+  if(inList) out+='</ul>';
+  return out||'<p class="suggest">Nothing written yet.</p>';
+}
+
+let recipeDraft=null, recipeOpen=null, recipeSearch='';
+window.newRecipe=()=>{recipeDraft={title:'',source:'',video:'',servings:'',minutes:null,tags:'',body:''};recipeOpen=null;foodSub='recipes';render()};
+window.editRecipe=id=>{const r=D.recipes.find(x=>x.id===id);if(!r)return;
+  recipeDraft={...r,tags:(r.tags||[]).join(', ')};recipeOpen=null;foodSub='recipes';render()};
+window.rdSet=(k,v)=>{recipeDraft[k]=v};
+window.openRecipe=id=>{recipeOpen=id;recipeDraft=null;foodSub='recipes';render()};
+window.closeRecipe=()=>{recipeOpen=null;recipeDraft=null;render()};
+window.recipeQ=v=>{recipeSearch=v};
+window.saveRecipe=async()=>{
+  const d=recipeDraft;
+  if(!d.title.trim()) return toast('Give the recipe a name');
+  const video=safeUrl(d.video), source=safeUrl(d.source);
+  if(d.video&&!video) return toast('The video link needs to start with https://');
+  if(d.source&&!source) return toast('The source link needs to start with https://');
+  const rec={...d,title:d.title.trim(),video:video||'',source:source||'',
+    minutes:+d.minutes>0?Math.round(+d.minutes):null,
+    tags:String(d.tags||'').split(',').map(s=>s.trim()).filter(Boolean).slice(0,8),
+    created:d.created||Date.now(),modified:Date.now()};
+  await put('recipes',rec); await reload('recipes');
+  recipeDraft=null; recipeOpen=null; render();
+  toast(`${rec.title} saved`);
+};
+window.deleteRecipe=async id=>{
+  const r=D.recipes.find(x=>x.id===id); if(!r) return;
+  if(!await confirmBox(`Delete <b>${esc(r.title)}</b>? The recipe text goes with it.`,'Delete','Cancel')) return;
+  await del('recipes',id); await reload('recipes'); recipeOpen=null; render(); toast('Recipe deleted');
+};
+
+function viewRecipes(){
+  if(recipeDraft) return viewRecipeForm();
+  if(recipeOpen!=null) return viewRecipeOne();
+  const q=norm(recipeSearch);
+  const list=D.recipes
+    .filter(r=>!q||norm(r.title).includes(q)||(r.tags||[]).some(t=>norm(t).includes(q))||norm(r.body).includes(q))
+    .sort((a,b)=>(b.modified||0)-(a.modified||0));
+  if(!D.recipes.length) return `<div class="empty card">
+    <p><strong>No recipes yet.</strong></p>
+    <p>Paste a YouTube or TikTok link, or type it out — whatever you actually cook from.</p>
+    <div class="actions"><button class="btn primary" onclick="newRecipe()">Add the first recipe</button></div></div>`;
+  return `<section class="block card">
+      <input class="field" placeholder="Search recipes…" value="${esc(recipeSearch)}"
+        oninput="recipeQ(this.value)" onchange="render()"></section>
+    ${list.length?list.map(r=>{
+      const v=videoEmbed(r.video);
+      const meta=[r.minutes>0?minsLabel(r.minutes):null,r.servings?`serves ${r.servings}`:null,
+        v?v.name:(r.video?linkHost(r.video):null),...(r.tags||[])].filter(Boolean).join(' · ');
+      return `<button class="itemcard card" onclick="openRecipe(${r.id})">
+        <span class="daychip fresh">${r.video?'▶':'📄'}</span>
+        <span class="iteminfo"><span class="nm">${esc(r.title)}</span>
+          <span class="meta">${esc(meta)}</span></span></button>`;
+    }).join(''):`<div class="empty card">Nothing matches that search.</div>`}`;
+}
+function viewRecipeOne(){
+  const r=D.recipes.find(x=>x.id===recipeOpen);
+  if(!r){ recipeOpen=null; return viewRecipes(); }
+  const v=videoEmbed(r.video);
+  const meta=[r.minutes>0?minsLabel(r.minutes):null,r.servings?`serves ${r.servings}`:null].filter(Boolean).join(' · ');
+  return `<section class="block card">
+      <h3>${esc(r.title)}</h3>
+      ${meta?`<p class="sub">${esc(meta)}</p>`:''}
+      ${(r.tags||[]).length?`<div class="chiprow" style="margin:6px 0 10px">${
+        r.tags.map(t=>`<span class="chip sm">${esc(t)}</span>`).join('')}</div>`:''}
+      ${v?`<div class="vidwrap"><iframe src="${esc(v.src)}" title="${esc(r.title)}"
+           loading="lazy" referrerpolicy="no-referrer"
+           allow="accelerometer; autoplay; clipboard-write; encrypted-media; picture-in-picture"
+           allowfullscreen></iframe></div>`
+        :r.video?`<p><a class="btn" href="${esc(r.video)}" target="_blank" rel="noopener noreferrer nofollow">Watch on ${esc(linkHost(r.video))}</a></p>`:''}
+      <div class="rich">${richText(r.body)}</div>
+      ${r.source?`<p class="suggest">From <a href="${esc(r.source)}" target="_blank" rel="noopener noreferrer nofollow">${esc(linkHost(r.source))}</a></p>`:''}
+      <div class="actions" style="margin-top:12px">
+        <button class="btn" onclick="editRecipe(${r.id})">Edit</button>
+        <button class="btn ghost" onclick="closeRecipe()">Back</button>
+        <button class="btn danger" onclick="deleteRecipe(${r.id})">Delete</button></div>
+    </section>`;
+}
+function viewRecipeForm(){
+  const d=recipeDraft;
+  const v=videoEmbed(d.video);
+  return `<section class="block card"><h3>${d.id?'Edit recipe':'New recipe'}</h3>
+    <div class="stack">
+      <input class="field" placeholder="Name" value="${esc(d.title)}" oninput="rdSet('title',this.value)">
+      <input class="field" placeholder="Video link (YouTube, TikTok, Instagram…)" value="${esc(d.video)}"
+        oninput="rdSet('video',this.value)" onchange="render()">
+      ${d.video?`<p class="suggest">${v?`${v.name} — plays right here in the app.`
+        :`${esc(linkHost(d.video))} — will show as a button that opens the app or site. Only YouTube and Vimeo can play inline.`}</p>`:''}
+      <div class="rowsplit">
+        <input class="field" placeholder="Serves" value="${esc(d.servings||'')}" oninput="rdSet('servings',this.value)">
+        <input class="field" type="number" min="1" placeholder="Minutes" value="${d.minutes||''}" oninput="rdSet('minutes',this.value)">
+      </div>
+      <input class="field" placeholder="Tags, comma separated (weeknight, Enzo likes)" value="${esc(d.tags||'')}" oninput="rdSet('tags',this.value)">
+      <div>
+        <div class="micro" style="margin-bottom:6px">Method and ingredients</div>
+        <textarea class="field" rows="12" style="min-height:240px;font-family:inherit"
+          oninput="rdSet('body',this.value)" placeholder="# Ingredients&#10;- 2 eggs&#10;- **1 cup** flour&#10;&#10;# Method&#10;Mix, then rest 20 minutes.">${esc(d.body||'')}</textarea>
+        <p class="suggest"><b>**bold**</b>, <i>*italic*</i>, <code># heading</code>,
+        <code>- bullet</code>. Any link you paste becomes tappable.</p>
+      </div>
+      <input class="field" placeholder="Where it came from (optional link)" value="${esc(d.source||'')}" oninput="rdSet('source',this.value)">
+      <div class="actions">
+        <button class="btn primary" onclick="saveRecipe()">Save</button>
+        <button class="btn ghost" onclick="closeRecipe()">Cancel</button></div>
+    </div></section>
+    ${d.body?`<section class="block card"><h3>Preview</h3><div class="rich">${richText(d.body)}</div></section>`:''}`;
+}
 
 /* ===================== MENU =====================
    A tablet on a fridge is used standing up, often by someone holding something
@@ -1165,14 +1499,18 @@ const minsLabel=m=>m>=120?`${(m/60).toFixed(m%60?1:0)} hr`:m>=60?`${(m/60).toFix
    can hit without looking. It is the default landing view.
    =============================================== */
 const MENU=[
-  ['food','🥘','Food',      ()=>`${D.items.length} logged`],
-  ['chores','🪴','Chores',  ()=>{const n=D.chores.filter(c=>(daysUntil(c.dueBy)??99)<=0).length;
-                                 return n?`${n} due now`:'nothing due'}],
+  ['food','🥘','Food',      ()=>`${D.items.length} logged · ${D.recipes.length} recipe${D.recipes.length===1?'':'s'}`],
+  ['chores','🪴','Chores',  ()=>{const n=D.chores.filter(c=>!isRoutine(c)&&hasRealDate(c.dueBy)&&(daysUntil(c.dueBy)??99)<=0).length;
+                                 const r=routineOpenNow().length;
+                                 return [n?`${n} due now`:null,r?`${r} routine${r===1?'':'s'}`:null]
+                                   .filter(Boolean).join(' · ')||'nothing due'}],
   ['habits','📈','Habits',  ()=>`${D.habits.length} tracked`],
   ['shop','💰','Shop',      ()=>`${D.shopping.filter(s=>!s.done).length} to buy`],
   ['notes','💬','Notes',    ()=>`${D.messages.length} on the board`],
   ['settings','⚙️','Setup', ()=>'names, lists, backup'],
 ];
+/* Named viewMenu for continuity with MENU; the LABEL is Dashboard, because in an
+   app about food "Menu" reads as a list of meals. */
 function viewMenu(){
   return `<div class="menugrid">${MENU.map(([t,ico,label,sub])=>
     `<button class="menutile" onclick="goTab('${t}')">
@@ -1210,6 +1548,7 @@ function bulkBar(list){
         <button class="chip" onclick="bulkDue('today')">Today</button>
         <button class="chip" onclick="bulkDue('tomorrow')">Tomorrow</button>
         <button class="chip" onclick="bulkDue('week')">In a week</button>
+        <button class="chip" onclick="bulkDue('someday')">Someday</button>
         <button class="chip" onclick="bulkDue('clear')">Remove due date</button></div>
       <div class="micro" style="margin:12px 0 6px">Roughly how long does the next step take?</div>
       <div class="chiprow">${[10,20,30,45,60,90,120,180].map(m=>
@@ -1246,8 +1585,8 @@ async function bulkApply(fn,label){
   toast(`${sel.length} chore${sel.length===1?'':'s'} updated — ${label}`);
 }
 window.bulkDue=w=>bulkApply(c=>{
-  c.dueBy=w==='clear'?'':w==='today'?todayISO():w==='tomorrow'?isoPlus(1):isoPlus(7);
-}, w==='clear'?'due date removed':'due date set');
+  c.dueBy=w==='clear'?'':w==='someday'?SOMEDAY:w==='today'?todayISO():w==='tomorrow'?isoPlus(1):isoPlus(7);
+}, w==='clear'?'due date removed':w==='someday'?'moved to someday':'due date set');
 window.bulkMins=m=>bulkApply(c=>{c.minutes=m>0?m:null}, m>0?`about ${minsLabel(m)}`:'time estimate cleared');
 window.bulkArea=a=>bulkApply(c=>{c.area=a}, `moved to ${a}`);
 window.bulkType=t=>bulkApply(c=>{c.type=t}, `type set to ${t}`);
@@ -1343,6 +1682,8 @@ function batchParse(kind,text){
         const who=ciFind(D.members,t);    if(who){(r.assignees??=[]).push(who.name);continue}
         const ty=ciFind(D.choreTypes,t);  if(ty&&!r.type){r.type=ty.name;continue}
         const d=batchDate(t);             if(d&&!r.dueBy){r.dueBy=d;continue}
+        if(/^(someday|sometime|no rush|eventually)$/i.test(t)&&!r.dueBy){r.dueBy=SOMEDAY;continue}
+        if(/^routine$/i.test(t)){r.routine=true;continue}
         if(/^(priority|urgent)$/i.test(t)){r.priority=true;continue}
       }
       r.unknown.push(t);
@@ -1405,6 +1746,7 @@ window.batchCommit=async()=>{
         category:r.category||proposed||null,libId:null,eatBy:r.eatBy||null,created:now,modified:now});
     }else{
       await put('chores',{title:r.name,type:r.type||proposed||null,area:r.area||null,minutes:r.minutes||null,
+        routine:!!r.routine,rdays:[],slots:[],ranchor:r.routine?todayISO():undefined,
         recurrence:r.recurrence||'none',interval:r.interval||7,checkIn:'',dueBy:r.dueBy||'',
         assignees:r.assignees||[],priority:!!r.priority,needsHelp:false,
         notes:r.notes||'',created:now,modified:now});
@@ -1475,12 +1817,15 @@ const recurLabel=c=>c.recurrence==='custom'?`every ${c.interval} days`:({daily:'
 function viewChores(){
   if(batch&&batch.kind==='chores') return viewBatch();
   if(choreDraft) return viewChoreForm();
+  const nOpen=routineOpenNow().length;
   const sub=`<div class="subbar">
-    <button class="chip on">What's next</button>
+    <button class="chip ${choreView==='tasks'?'on':''}" onclick="setChoreView('tasks')">What's next</button>
+    <button class="chip ${choreView==='routines'?'on':''}" onclick="setChoreView('routines')">Routines${nOpen?` · ${nOpen}`:''}</button>
     <button class="chip" onclick="newChore()">+ Add chore</button>
     <button class="chip" onclick="openBatch('chores')">≡ Batch add</button>
     <button class="chip" onclick="showHistory()">History</button>
   </div>`;
+  if(choreView==='routines') return sub+viewRoutines();
   if(D.chores.length===0) return sub+`<div class="empty card"><p><strong>No chores yet.</strong></p>
     <p>Tap <b>+ Add chore</b> to set one up.</p></div>`;
   const types=[...new Set(D.chores.map(c=>c.type).filter(Boolean))];
@@ -1500,7 +1845,8 @@ function viewChores(){
      +`<button class="chip ${choreFilterDue==='overdue'?'on':''}" onclick="filterDue('overdue')">Overdue</button>`
      +`<button class="chip ${choreFilterDue==='today'?'on':''}" onclick="filterDue('today')">Due today</button>`
      +`<button class="chip ${choreFilterDue==='week'?'on':''}" onclick="filterDue('week')">Next 7 days</button>`
-     +`<button class="chip ${choreFilterDue==='none'?'on':''}" onclick="filterDue('none')">No due date</button>`)
+     +`<button class="chip ${choreFilterDue==='none'?'on':''}" onclick="filterDue('none')">No due date</button>`
+     +`<button class="chip ${choreFilterDue==='someday'?'on':''}" onclick="filterDue('someday')">Someday</button>`)
    +row("Who's available?", whos.map(w=>
       `<button class="chip ${choreFilterWho===w?'on':''} ${memberByName(w)?.avatar?'hasface':''}" onclick="filterWho(${q(w)})">${memberFace(w,true)}</button>`).join(''))
    +row("Which part of the house?", areas.map(a=>
@@ -1516,7 +1862,7 @@ function viewChores(){
   const active=[
     choreFilterTime&&TIMEBUCKETS.find(([k])=>k===choreFilterTime)[1],
     choreFilterPri&&'priority',
-    choreFilterDue&&({overdue:'overdue',today:'due today',week:'next 7 days',none:'no due date'})[choreFilterDue],
+    choreFilterDue&&({overdue:'overdue',today:'due today',week:'next 7 days',none:'no due date',someday:'someday'})[choreFilterDue],
     choreFilterWho, choreFilterArea, choreFilterType,
     choreGapsOnly&&'needs details',
   ].filter(Boolean);
@@ -1528,10 +1874,16 @@ function viewChores(){
     ${filtersOpen?`<div class="bulkbody">${inner}</div>`:''}</div>`;
 
   let list=D.chores.filter(choreMatches);
-  list.sort((a,b)=>{
-    if(!!b.priority-!!a.priority) return !!b.priority-!!a.priority;
-    return (daysUntil(a.dueBy)??9e9)-(daysUntil(b.dueBy)??9e9);
-  });
+  /* Three tiers: dated (by urgency), then undated, then someday. Someday is
+     always last even when marked priority — "priority someday" means "when we
+     get to it, do this one first", not "do it now". */
+  const tier=c=>isSomeday(c)?2:(hasRealDate(c.dueBy)?0:1);
+  list.sort((a,b)=>
+    tier(a)-tier(b)
+    || (!!b.priority-!!a.priority)
+    || ((daysUntil(a.dueBy)??9e9)-(daysUntil(b.dueBy)??9e9))
+    || String(a.title||'').localeCompare(String(b.title||''))
+  );
   const body=list.length?list.map(choreCard).join('')
     :`<div class="empty card"><p><strong>Nothing matches.</strong></p>
        <p>Try widening one of the filters above — most often it is the time bucket,
@@ -1540,6 +1892,8 @@ function viewChores(){
 }
 const anyChoreFilter=()=>!!(choreFilterType||choreFilterWho||choreFilterTime||choreFilterArea||choreFilterDue||choreFilterPri||choreGapsOnly);
 function choreMatches(c){
+  /* The whole point of a routine is that it is NOT on the task list. */
+  if(isRoutine(c)) return false;
   if(choreFilterType&&c.type!==choreFilterType) return false;
   if(choreFilterWho&&!(c.assignees||[]).includes(choreFilterWho)) return false;
   if(choreFilterArea&&c.area!==choreFilterArea) return false;
@@ -1550,6 +1904,8 @@ function choreMatches(c){
   if(choreFilterTime&&timeBucket(c.minutes)!==choreFilterTime) return false;
   if(choreFilterDue){
     const d=daysUntil(c.dueBy);
+    if(choreFilterDue==='someday'&&!isSomeday(c)) return false;
+    if(choreFilterDue!=='someday'&&isSomeday(c)) return false;   /* never in a dated bucket */
     if(choreFilterDue==='none'&&c.dueBy) return false;
     if(choreFilterDue==='overdue'&&!(d!==null&&d<0)) return false;
     if(choreFilterDue==='today'&&d!==0) return false;
@@ -1557,6 +1913,7 @@ function choreMatches(c){
   }
   return true;
 }
+window.setChoreView=v=>{choreView=v;choreSel.clear();bulkOpen=false;render()};
 window.filterType=t=>{choreFilterType=choreFilterType===t?null:t;render()};
 window.filterWho=w=>{choreFilterWho=choreFilterWho===w?null:w;render()};
 window.filterArea=a=>{choreFilterArea=choreFilterArea===a?null:a;render()};
@@ -1581,6 +1938,26 @@ function viewChoreForm(){
       <div><div class="micro" style="margin-bottom:8px">Roughly how long is the next step?</div><div class="chiprow">${
         [10,20,30,45,60,90,120,180].map(m=>`<button class="chip ${+c.minutes===m?'on':''}" onclick="cdSet('minutes',${m})">${minsLabel(m)}</button>`).join('')}
         <button class="chip ${!(+c.minutes>0)?'on':''}" onclick="cdSet('minutes',0)">Not sure</button></div></div>
+      <div><div class="micro" style="margin-bottom:8px">Is this a daily routine?</div>
+        <div class="chiprow">
+          <button class="chip ${c.routine?'on':''}" onclick="cdRoutine(true)">Routine</button>
+          <button class="chip ${!c.routine?'on':''}" onclick="cdRoutine(false)">One-off or scheduled task</button></div>
+        <p class="suggest">A routine stays off the task list and shows on its own page instead.
+        Anything nobody ticks closes itself the next day rather than piling up.</p></div>
+      ${c.routine?`
+      <div><div class="micro" style="margin-bottom:8px">Which days?</div>
+        <div class="chiprow">${ROUTINE_PRESETS.map((p,i)=>
+          `<button class="chip ${routinePresetOn(c,p)?'on':''}" onclick="cdPreset(${i})">${p.label}</button>`).join('')}</div>
+        <div class="chiprow" style="margin-top:8px">${WEEKDAYS.map(([n,l])=>
+          `<button class="chip ${(c.rdays||[]).includes(+n)?'on':''}" onclick="cdDay(${n})">${l}</button>`).join('')}</div>
+        <p class="suggest">${(c.rdays||[]).length?'On the days picked above.'
+          :+c.interval>1?`Every ${c.interval} days, counting from ${esc(fmtDate((c.ranchor||todayISO())+'T12:00:00'))}.`
+          :'Every day.'}</p></div>
+      <div><div class="micro" style="margin-bottom:8px">How many times a day?</div>
+        <div class="chiprow">${SLOT_PRESETS.map((s,i)=>
+          `<button class="chip ${JSON.stringify(c.slots||[])===JSON.stringify(s.slots)?'on':''}" onclick="cdSlots(${i})">${s.label}</button>`).join('')}</div>
+        ${(c.slots||[]).length?`<p class="suggest">${esc(c.slots.join(' · '))} — each is ticked separately.</p>`:''}</div>
+      `:`
       <div><div class="micro" style="margin-bottom:8px">Repeats</div><div class="chiprow">${RECURRENCES.map(([k,l])=>
         `<button class="chip ${c.recurrence===k?'on':''}" onclick="cdSet('recurrence','${k}')">${l}</button>`).join('')}
         ${c.recurrence==='custom'?`<input class="field" style="width:110px;min-height:44px" type="number" min="1" value="${c.interval}" oninput="choreDraft.interval=+this.value||1">`:''}</div></div>
@@ -1588,8 +1965,11 @@ function viewChoreForm(){
         <div><div class="micro" style="margin-bottom:8px">Check in on</div>
           <input class="field" type="date" value="${c.checkIn||''}" onchange="choreDraft.checkIn=this.value"></div>
         <div><div class="micro" style="margin-bottom:8px">Due by</div>
-          <input class="field" type="date" value="${c.dueBy||''}" onchange="choreDraft.dueBy=this.value"></div>
+          <input class="field" type="date" value="${hasRealDate(c.dueBy)?c.dueBy:''}" onchange="choreDraft.dueBy=this.value"></div>
       </div>
+      <div class="chiprow">
+        <button class="chip ${isSomeday(c)?'on':''}" onclick="cdSet('dueBy',SOMEDAY)">Someday</button></div>
+      `}
       <div><div class="micro" style="margin-bottom:8px">Assign to</div><div class="chiprow">${
         D.members.length?D.members.map(m=>`<button class="chip ${c.assignees.includes(m.name)?'on':''}" onclick="cdWho(${q(m.name)})">${memberFace(m.name,false)}</button>`).join('')
         :'<span style="color:var(--muted)">Add household names in Setup first.</span>'}</div></div>
@@ -1605,6 +1985,23 @@ function viewChoreForm(){
       <button class="btn ghost" onclick="choreDraft=null;render()">Cancel</button>
     </div></section>`;
 }
+const routinePresetOn=(c,p)=>p.rdays.length
+  ? JSON.stringify([...(c.rdays||[])].sort())===JSON.stringify([...p.rdays].sort())
+  : !(c.rdays||[]).length && (+c.interval||1)===(p.interval||1);
+window.cdRoutine=v=>{
+  const c=choreDraft; c.routine=!!v;
+  if(v){ c.slots??=[]; c.rdays??=[]; c.interval=+c.interval>1?+c.interval:1;
+         c.ranchor??=todayISO();
+         /* a routine has no single due date — its dates are generated */
+         c.dueBy=''; c.recurrence='none'; }
+  render();
+};
+window.cdPreset=i=>{const p=ROUTINE_PRESETS[i],c=choreDraft;
+  c.rdays=[...p.rdays]; if(!p.rdays.length) c.interval=p.interval||1;
+  c.ranchor=c.ranchor||todayISO(); render()};
+window.cdDay=n=>{const c=choreDraft; c.rdays=[...(c.rdays||[])];
+  const i=c.rdays.indexOf(n); i<0?c.rdays.push(n):c.rdays.splice(i,1); c.rdays.sort(); render()};
+window.cdSlots=i=>{choreDraft.slots=[...SLOT_PRESETS[i].slots];render()};
 window.cdSet=(k,v)=>{choreDraft[k]=(choreDraft[k]===v&&(k==='type'||k==='area'))?null:v;
   if(k==='minutes'&&!(v>0)) choreDraft.minutes=null; render()};
 window.cdWho=n=>{const a=choreDraft.assignees; const i=a.indexOf(n); i<0?a.push(n):a.splice(i,1); render()};
@@ -1620,25 +2017,82 @@ window.openChore=id=>{
   const hist=D.choreHistory.filter(h=>h.choreId===id).sort((a,b)=>b.at-a.at).slice(0,5);
   showSheet(`
     <h2>${esc(c.title)}</h2>
-    <p class="sub">${esc(c.type||'no type')} · ${c.dueBy?'due '+fmtDate(c.dueBy+'T12:00:00'):'no due date'}${c.recurrence!=='none'?' · '+recurLabel(c):''}</p>
+    <p class="sub">${esc(c.type||'no type')} · ${isRoutine(c)?esc(routineWhen(c)):esc(dueLabel(c))}${!isRoutine(c)&&c.recurrence!=='none'?' · '+recurLabel(c):''}</p>
     ${c.notes?`<div class="guide"><span class="micro">Notes</span><p style="margin-top:6px;white-space:pre-wrap">${esc(c.notes)}</p></div>`:''}
     ${c.checkIn?`<p class="sub" style="margin-top:10px">Check in on ${fmtDate(c.checkIn+'T12:00:00')}</p>`:''}
-    <section class="block card"><h3>Mark done by</h3>
+    ${isRoutine(c)?`<section class="block card"><h3>Today</h3>
+      <div class="chiprow">${rslots(c).map((slot,i)=>{
+        const st=rStatus(c,todayISO(),i);
+        return routineActive(c,todayISO())
+          ? `<button class="chip big ${st==='done'?'on':''}" onclick="closeSheet();openRoutineTick(${id},${q(todayISO())},${i})">${
+              esc(slot||'Tick off')}${st==='done'?' ✓':''}</button>`
+          : '';
+      }).join('')||`<span style="color:var(--muted)">Not scheduled today.</span>`}</div>
+      <p class="suggest">Routines are ticked per day on the Routines page, so their history stays
+      per-occurrence rather than collapsing into one "last done".</p></section>`
+      :`<section class="block card"><h3>Mark done by</h3>
       <div class="chiprow">${D.members.length?D.members.map(m=>
         `<button class="chip big" onclick="completeChore(${id},${q(m.name)})">${memberFace(m.name,false)}</button>`).join('')
         :`<button class="chip big" onclick="completeChore(${id},'')">Done</button>
-          <span style="color:var(--muted);align-self:center">Add names in Setup to track who.</span>`}</div></section>
+          <span style="color:var(--muted);align-self:center">Add names in Setup to track who.</span>`}
+        ${D.members.length?`<button class="chip big" onclick="completeChore(${id},'Someone else')">Someone else</button>`:''}
+      </div></section>`}
     ${hist.length?`<div class="guide"><span class="micro">Recent</span>${hist.map(h=>
       `<p style="margin-top:6px">${esc(h.by||'someone')} · ${fmtDate(h.at)}</p>`).join('')}</div>`:''}
     <div class="actions">
+      ${isRoutine(c)?`<button class="btn" onclick="closeSheet();setChoreView('routines')">See routine</button>`
+        :`<button class="btn" onclick="openReschedule(${id})">Reschedule</button>`}
       <button class="btn" onclick="editChore(${id})">Edit</button>
       <button class="btn ${c.needsHelp?'primary':''}" onclick="toggleFlag(${id},'needsHelp')">${c.needsHelp?'Clear needs-help':'Needs help'}</button>
       <button class="btn danger" onclick="deleteChore(${id})">Delete</button>
     </div>`);
 };
+/* Reschedule without opening the full edit form. A native date input is the
+   calendar — no picker to build, no library, and the tablet gets its own OS
+   control, which is a better one than anything hand-rolled at this size. */
+window.openReschedule=id=>{
+  const c=D.chores.find(x=>x.id===id); if(!c)return;
+  const wk=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const soon=[[0,'Today'],[1,'Tomorrow'],[2,null],[3,null],[7,'Next week']]
+    .map(([n,label])=>{
+      const iso=isoPlus(n);
+      const nm=label||wk[new Date(iso+'T12:00:00').getDay()];
+      return `<button class="chip ${c.dueBy===iso?'on':''}" onclick="setDue(${id},${q(iso)})">${nm}</button>`;
+    }).join('');
+  showSheet(`<h2>When is this due?</h2>
+    <p class="sub">${esc(c.title)} · currently ${esc(dueLabel(c))}</p>
+    <section class="block card"><h3>Soon</h3><div class="chiprow">${soon}
+      <button class="chip" onclick="setDue(${id},${q(isoPlus(14))})">In 2 weeks</button>
+      <button class="chip" onclick="setDue(${id},${q(isoPlus(30))})">In a month</button></div></section>
+    <section class="block card"><h3>Pick a date</h3>
+      <input class="field" type="date" id="rsDate" value="${hasRealDate(c.dueBy)?esc(c.dueBy):''}"
+        min="2020-01-01" max="2099-12-31" onchange="setDue(${id},this.value)">
+      <p class="suggest">Opens your device's own calendar.</p></section>
+    <section class="block card"><h3>No fixed date</h3>
+      <div class="chiprow">
+        <button class="chip ${isSomeday(c)?'on':''}" onclick="setDue(${id},${q(SOMEDAY)})">Someday</button>
+        <button class="chip ${!c.dueBy?'on':''}" onclick="setDue(${id},'')">Clear the date</button></div>
+      <p class="suggest"><b>Someday</b> means worth doing with no timeline — it never shows as due or
+      overdue, and always sorts to the bottom of the list. <b>Clear</b> leaves it undated, which counts
+      as a missing detail.</p></section>
+    ${c.recurrence!=='none'?`<p class="suggest">This repeats ${esc(recurLabel(c))} — changing the date
+      moves the next occurrence, not the pattern.</p>`:''}
+    <div class="actions"><button class="btn ghost" onclick="closeSheet()">Cancel</button></div>`);
+};
+window.setDue=async(id,v)=>{
+  const c=D.chores.find(x=>x.id===id); if(!c)return;
+  if(v&&v!==SOMEDAY&&!/^\d{4}-\d{2}-\d{2}$/.test(v)) return toast('That date was not understood');
+  c.dueBy=v||''; c.modified=Date.now();
+  await put('chores',c); await reload('chores');
+  closeSheet(); render();
+  toast(`${c.title} — ${dueLabel(c)}`);
+};
 window.toggleFlag=async(id,k)=>{const c=D.chores.find(x=>x.id===id);c[k]=!c[k];await put('chores',c);openChore(id);render()};
 window.completeChore=async(id,who)=>{
   const c=D.chores.find(x=>x.id===id); if(!c)return;
+  /* Routines are ticked per occurrence; completing one wholesale would delete a
+     rhythm the household still needs. */
+  if(isRoutine(c)) return openRoutineTick(id,todayISO(),0);
   await put('choreHistory',{choreId:id,title:c.title,type:c.type,by:who,at:Date.now()});
   if(c.recurrence==='none'){
     await del('chores',id);
@@ -2516,21 +2970,45 @@ const TABLES={
       done:/^(yes|true|1)$/i.test(r.done||''),created:Date.now()}:(errs.push('name is blank'),null)},
   shops:{store:'stores',cols:['name'],ex:['Grocery Store'],
     out:s=>[s.name], inn:(r,errs)=>r.name?.trim()?{name:r.name.trim()}:(errs.push('name is blank'),null)},
-  chores:{store:'chores',cols:['title','type','area','minutes','recurrence','interval_days','check_in','due_by','assignees','priority','needs_help','notes'],
-    ex:['Take out recycling','Garbage','Outside','15','weekly','','','2026-08-10','Alex|Sam','no','no','Blue bin, curb by 7am'],
-    out:c=>[c.title,c.type,c.area,c.minutes,c.recurrence,c.interval,c.checkIn,c.dueBy,(c.assignees||[]).join('|'),
+  recipes:{store:'recipes',cols:['title','video','source','servings','minutes','tags','body','created','modified'],
+    ex:['Shoyu ramen','https://youtu.be/xxxx','','4','45','weeknight|soup','# Ingredients\n- 2 eggs','',''],
+    out:r=>[r.title,r.video,r.source,r.servings,r.minutes,(r.tags||[]).join('|'),r.body,
+      new Date(r.created).toISOString(),new Date(r.modified||r.created).toISOString()],
+    inn:(r,errs,warns)=>{
+      if(!r.title?.trim()) return errs.push('title is required'),null;
+      /* a bad link must not silently become an unclickable string, and must
+         never be a javascript: url once rendered */
+      for(const f of ['video','source']) if(r[f]&&!safeUrl(r[f])){ warns.push(`${f} "${r[f]}" is not an http(s) link — imported without it`); r[f]=''; }
+      const t=Date.parse(r.created)||Date.now();
+      return {title:r.title.trim(),video:safeUrl(r.video)||'',source:safeUrl(r.source)||'',
+        servings:r.servings||'',minutes:+r.minutes>0?Math.round(+r.minutes):null,
+        tags:(r.tags||'').split('|').map(s=>s.trim()).filter(Boolean).slice(0,8),
+        body:r.body||'',created:t,modified:Date.parse(r.modified)||t};
+    }},
+  chores:{store:'chores',cols:['title','type','area','minutes','routine','routine_days','routine_slots','recurrence','interval_days','check_in','due_by','assignees','priority','needs_help','notes'],
+    ex:['Feed the cat','Pet Care','Kitchen','5','yes','','Breakfast|Dinner','','','','','','no','no','Half a tin each time'],
+    out:c=>[c.title,c.type,c.area,c.minutes,c.routine?'yes':'no',(c.rdays||[]).join('|'),(c.slots||[]).join('|'),
+      c.recurrence,c.interval,c.checkIn,c.dueBy,(c.assignees||[]).join('|'),
       c.priority?'yes':'no',c.needsHelp?'yes':'no',c.notes],
     inn:(r,errs,warns)=>{
       if(!r.title?.trim()) return errs.push('title is blank'),null;
+      if(r.due_by&&/^(someday|sometime|no rush|eventually)$/i.test(r.due_by.trim())) r.due_by=SOMEDAY;
       const R=parseRecurrence(r.recurrence,r.interval_days);
       if(!R) return errs.push(`recurrence "${r.recurrence}" was not understood. Accepted: none/once, daily, weekly, monthly, `
         +`yearly, quarterly, fortnightly, "every 3 days", "every 2 weeks", or custom/every_n_days with interval_days set`),null;
-      for(const f of ['check_in','due_by']) if(r[f]&&!/^\d{4}-\d{2}-\d{2}$/.test(r[f])) return errs.push(`${f} must be YYYY-MM-DD`),null;
+      for(const f of ['check_in','due_by'])
+        if(r[f]&&r[f]!==SOMEDAY&&!/^\d{4}-\d{2}-\d{2}$/.test(r[f]))
+          return errs.push(`${f} must be YYYY-MM-DD${f==='due_by'?' or "someday"':''}`),null;
       const area=r.area?D.areas.find(a=>a.name.toLowerCase()===r.area.toLowerCase()):null;
       if(r.area&&!area) warns.push(`part of the house "${r.area}" is not set up here — imported without one`);
       const mins=+r.minutes>0?Math.round(+r.minutes):null;
       if(r.minutes&&!mins) warns.push(`minutes "${r.minutes}" is not a positive number — imported without an estimate`);
+      const routine=/^(y|yes|true|1)$/i.test(String(r.routine||'').trim());
+      const rdays=String(r.routine_days||'').split('|').map(s=>+s.trim())
+        .filter(n=>Number.isInteger(n)&&n>=0&&n<=6);
+      const slots=String(r.routine_slots||'').split('|').map(s=>s.trim()).filter(Boolean).slice(0,6);
       return {title:r.title.trim(),type:r.type||null,area:area?area.name:null,minutes:mins,
+        routine,rdays,slots,ranchor:routine?todayISO():undefined,
         recurrence:R.recurrence,interval:R.interval,
         checkIn:r.check_in||'',dueBy:r.due_by||'',assignees:(r.assignees||'').split('|').filter(Boolean),
         priority:/^(yes|true|1)$/i.test(r.priority||''),needsHelp:/^(yes|true|1)$/i.test(r.needs_help||''),
