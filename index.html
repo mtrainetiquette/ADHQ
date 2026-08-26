@@ -127,6 +127,31 @@
   .chip.sm{min-height:0;padding:2px 9px;font-size:12px;font-weight:600}
   .chip.sm.new{border-style:dashed}
   .chip.sm.gap{opacity:.75;font-style:italic}
+  .chip.sm.pickable{border-style:dashed;min-height:32px}
+  /* the count of jobs a person could pick up, on their dashboard button */
+  .wcount{margin-left:8px;padding:1px 8px;border-radius:999px;background:var(--accent);
+    color:var(--accent-ink);font-size:13px;font-weight:800;font-variant-numeric:tabular-nums}
+
+  /* meal plan: seven rows, three columns. Squares are big enough to tap on a
+     tablet held at arm's length in a kitchen. */
+  .mpwrap{padding:10px;overflow-x:auto}
+  .mprow{display:grid;gap:6px;margin-bottom:6px}
+  .mprow:last-child{margin-bottom:0}
+  .mphead .mpcol{background:none;border:0;min-height:0;padding:2px 0;text-align:center;
+    font-size:12px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
+  .mpday{display:flex;flex-direction:column;justify-content:center;padding:6px 4px;line-height:1.2}
+  .mpcol{min-height:60px;border-radius:12px;border:1px solid var(--line);background:var(--panel-2);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+    padding:6px 4px;text-align:center;overflow:hidden}
+  .mpcol .micro{opacity:.8;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  /* Green is the whole point of the grid, so it is the strongest thing on it —
+     and it means every routine for that meal was ticked, nothing weaker. */
+  .mp-done{background:rgba(95,208,138,.22);border:2px solid var(--fresh);color:var(--fresh)}
+  /* part-done must not read as done: two of three cooked is not dinner handled */
+  .mp-part{background:rgba(240,163,94,.16);border:1px solid var(--soon);color:var(--soon)}
+  .mp-lapsed{background:rgba(232,100,106,.14);border:1px solid var(--late);color:var(--late)}
+  .mp-skipped{border-style:dashed;color:var(--muted)}
+  .mp-none{color:var(--muted);opacity:.5;border-style:dashed}
 
   nav.tabs{position:fixed;left:0;top:0;bottom:0;z-index:20;width:88px;
     background:var(--panel);border-right:1px solid var(--line);
@@ -241,6 +266,8 @@
   /* Skipping is not a person, so it is the one chip in the row drawn open. Still
      the same green and weight — it is an equal option, not a lesser one. */
   .card.whodid .chip.skip{border-style:dashed;background:transparent}
+  /* the shift button: same row as the names, visibly a mode rather than a person */
+  .chip.big.shift{border-style:dashed}
   dialog.confirm{border:1px solid var(--line);border-radius:18px;background:var(--panel);color:var(--text);
     padding:22px;max-width:420px;width:90%}
   dialog.confirm::backdrop{background:rgba(0,0,0,.55)}
@@ -557,7 +584,7 @@ const TIMEBUCKETS=[
 const timeBucket=m=>!(+m>0)?null:(TIMEBUCKETS.find(([,,lo,hi])=>m>=lo&&m<=hi)||TIMEBUCKETS[0])[0];
 const STREAK_GOAL=7;  /* days in a row that earn one prize from the queue */
 const RECURRENCES=[['none','One-off'],['daily','Daily'],['weekly','Weekly'],['monthly','Monthly'],['custom','Every N days']];
-const CAP={cats:50,choreTypes:50,habits:50,members:10,stores:50,locations:24,areas:30};
+const CAP={cats:50,choreTypes:50,habits:50,members:10,stores:50,locations:24,areas:30,meals:6};
 const REV_LABEL={usda:'USDA-reviewed',owner:'Owner-added',unrev:'Unreviewed'};
 const SERIES=['#f5c84c','#5fd08a','#6fb3e8','#b98ae0','#f0a35e','#e8646a','#7fd9cf','#c9d05f','#e089b8','#8fa6f0'];
 
@@ -568,7 +595,7 @@ const SERIES=['#f5c84c','#5fd08a','#6fb3e8','#b98ae0','#f0a35e','#e8646a','#7fd9
    SYNC.enabled=true   -> Connected edition. Structured text only, never blobs. */
 /* Shown in Setup -> Storage and under the menu. Bump on every hand-off.
    Eight rounds of "is this the new file?" is eight rounds too many. */
-const BUILD='2026-08-24 · r16';
+const BUILD='2026-08-24 · r18';
 
 const SYNC={
   enabled:true,
@@ -585,7 +612,7 @@ const SYNC={
 const syncable=s=>SYNC.enabled&&SYNC.stores.includes(s);
 
 /* ---------- IndexedDB ---------- */
-const STORES=['items','categories','shopping','common','members','chores','choreTypes','choreHistory','habits','habitLogs','messages','stores','prizes','locations','areas','recipes','routineLogs'];
+const STORES=['items','categories','shopping','common','members','chores','choreTypes','choreHistory','habits','habitLogs','messages','stores','prizes','locations','areas','recipes','routineLogs','meals'];
 let db, dbName='adhq';
 
 /* A SECOND, tiny database that holds only the session and the household->database
@@ -638,7 +665,7 @@ async function dbNameFor(uid){
    the previous build (TRANSFER.md invariant #5).
    The self-heal below means forgetting again is no longer fatal — but bump it
    anyway, because the heal costs an extra open. */
-const DB_VERSION=10;
+const DB_VERSION=11;   /* 11 adds `meals`, the household's meal list */
 const AUX_STORES=['library','libmeta','sync'];   /* outside STORES on purpose */
 
 function idbOpen(name,version){
@@ -742,6 +769,21 @@ let choreFilterType=null, choreFilterWho=null, choreDraft=null;
 let batch=null, foodGapsOnly=false, choreGapsOnly=false;
 let foodSel=new Set(), foodSelMode=false, foodGapKind=null;
 let choreFilterTime=null, choreFilterArea=null, choreFilterDue=null, choreFilterPri=false;
+/* Set from the dashboard's "Looking for work?" buttons. Separate from
+   choreFilterWho on purpose: that one asks whose a job is, this one asks what a
+   person could pick up, and the answers are different lists. */
+let choreAvailFor=null;
+/* Some jobs really are done by two people. One tap for one person stays the
+   default because it is the common case; the shift button opens multi-select for
+   the rest. Session-only, and cleared whenever a sheet closes, so it can never
+   quietly credit yesterday's pair for today's job. */
+let pickMulti=false, pickSel=new Set();
+const resetPick=()=>{pickMulti=false;pickSel=new Set()};
+/* One record, several names: `by` keeps the first so every existing reader still
+   works, `also` carries the rest. All credit is read through these two, so a
+   caller that forgets about `also` cannot drop somebody. */
+const creditedNames=r=>[r?.by,...(r?.also||[])].filter(Boolean);
+const creditLabel=r=>{const n=creditedNames(r); return n.length?n.join(' & '):'someone'};
 let choreSel=new Set(), bulkOpen=false, filtersOpen=false;
 /* Routines are rows in the ordinary chore list, not a list of their own — this
    only hides or shows them. Session-only, like every other chore filter: a
@@ -1129,7 +1171,12 @@ function viewFood(){
     <button class="chip ${foodSub==='add'?'on':''}" onclick="setSub('add')">+ Add food</button>
     <button class="chip" onclick="openBatch('food')">≡ Batch add</button>
     <button class="chip ${foodSub==='recipes'?'on':''}" onclick="setSub('recipes')">📖 Recipes</button>
+    <button class="chip ${foodSub==='meals'?'on':''}" onclick="setSub('meals')">🍽️ Meal plan</button>
   </div>`;
+  /* Meals live under Food rather than Chores even though the data is routines:
+     "what are we eating this week" is a food question, and the chore list is
+     already where the individual ticks happen. */
+  if(foodSub==='meals') return sub+viewMealPlan();
   if(foodSub==='recipes') return sub
     +(recipeDraft||recipeOpen!=null?'':`<div class="subbar"><button class="chip" onclick="newRecipe()">+ New recipe</button></div>`)
     +viewRecipes();
@@ -1374,13 +1421,52 @@ const ROUTINE_PRESETS=[
   {label:'Weekends',         rdays:[0,6]},
   {label:'Tue & Fri',        rdays:[2,5]},
 ];
-const SLOT_PRESETS=[
-  {label:'Once a day',            slots:[]},
-  {label:'Breakfast & dinner',    slots:['Breakfast','Dinner']},
-  {label:'Three meals',           slots:['Breakfast','Lunch','Dinner']},
-  {label:'Morning & evening',     slots:['Morning','Evening']},
-];
+/* Built from the household's meal list rather than fixed, so a house that eats
+   four times a day is offered its four — and so the slot names a routine gets
+   match the columns the meal plan looks for. A preset that offered "Dinner" to a
+   household whose evening meal is called Tea would create a routine that can
+   never land in a column. */
+const slotPresets=()=>{
+  const meals=mealNames();
+  return [
+    {label:'Once a day', slots:[]},
+    ...(meals.length>2?[{label:`${meals[0]} & ${meals[meals.length-1]}`,
+                         slots:[meals[0],meals[meals.length-1]]}]:[]),
+    {label:`Every meal · ${meals.length}`, slots:[...meals]},
+    {label:'Morning & evening', slots:['Morning','Evening']},
+  ];
+};
+/* ---- meals ----
+   mealNames() is the household's meal list, and the calendar has one column per
+   entry. A routine counts as a
+   meal only when it says so (`c.meal`), never because a slot happens to be
+   named Breakfast: "Feed the cat · Breakfast" is not breakfast, and a calendar
+   that guessed would show dinner as handled on the strength of the cat being
+   fed (invariant #7). The flag is one tap in the routine form. */
+const MEAL_DEFAULTS=['Breakfast','Lunch','Dinner'];
+/* How many meals a day, and what they are called, is a household decision — two
+   for some, five for others, and not everyone calls the evening one dinner. So
+   this is a stored list like rooms or chore types, not a constant.
+
+   It lives in the `meals` store, which is NOT in SYNC.stores: adding it there
+   needs a matching `meals` table on the server, and that SQL is not something
+   this file can run. Until then the list is per-device. Everything that DEPENDS
+   on it — which routine covers which meal — is carried on the routine's own
+   slots, which do sync, so a second tablet shows the right plan as soon as its
+   own meal list matches. That is the wart; it is one line in SYNC.stores plus
+   one table to remove. */
+const mealNames=()=>{
+  const rows=(D.meals||[]).slice().sort((a,b)=>(a.pos??0)-(b.pos??0))
+    .map(m=>String(m.name||'').trim()).filter(Boolean);
+  return rows.length?rows:MEAL_DEFAULTS;
+};
+
 const isRoutine=c=>!!c?.routine;
+const isMealRoutine=c=>isRoutine(c)&&!!c.meal;
+/* Every meal routine covering a given meal, in title order. More than one can —
+   "Cook dinner" and "Pack tomorrow's lunch" each count toward their own slot. */
+const mealRoutines=meal=>D.chores.filter(c=>isMealRoutine(c)&&(c.slots||[]).includes(meal))
+  .sort((a,b)=>String(a.title||'').localeCompare(String(b.title||'')));
 const rslots=c=>(Array.isArray(c.slots)&&c.slots.length?c.slots:['']);
 const isoOf=n=>isoPlus(n);
 const dowOf=iso=>new Date(iso+'T12:00:00').getDay();
@@ -1430,19 +1516,27 @@ function routineDay(iso){
 const routineOpenNow=()=>[...routineDay(isoOf(-1)),...routineDay(isoOf(0))]
   .filter(o=>o.status==='open'||o.status==='late');
 
-window.tickRoutine=async(id,iso,i,who)=>{
+window.tickRoutine=async(id,iso,i,who,fromMulti)=>{
   const c=D.chores.find(x=>x.id===id); if(!c)return;
   const slot=rslots(c)[i]??'';
   const existing=rlog(c,iso,i);
   if(existing){ const wasSkip=!!existing.skipped;
-    await del('routineLogs',existing.id); await reload('routineLogs'); render();
+    await del('routineLogs',existing.id); await reload('routineLogs'); resetPick(); render();
     return toast(`${c.title}${slot?' · '+slot:''} — ${wasSkip?'back on the list':'unticked'}`); }
-  await put('routineLogs',{key:rkey(c,iso,i),choreId:id,date:iso,slot,by:who||'',at:Date.now()});
+  /* One occurrence, one log row — the key is unique per day and slot, so several
+     helpers cannot each have their own. `by` holds the first and `also` the rest,
+     and every reader goes through creditedNames() rather than reading `by` raw. */
+  const names=fromMulti?[...pickSel]:(who?[who]:[]);
+  if(fromMulti&&!names.length) return;
+  const [first,...rest]=names;
+  await put('routineLogs',{key:rkey(c,iso,i),choreId:id,date:iso,slot,
+    by:first||'',...(rest.length?{also:rest}:{}),at:Date.now()});
   /* Routines also land in the normal history, so "who fed the cat" is answerable
      and streaks work. Lapsed ones never do — nobody gets credit for those. */
-  await put('choreHistory',{choreId:id,title:c.title+(slot?' · '+slot:''),type:c.type,by:who||'',at:Date.now(),routine:true});
-  await reload('routineLogs','choreHistory'); closeSheet(); render();
-  toast(`${c.title}${slot?' · '+slot:''} done${who?' by '+who:''}`);
+  await put('choreHistory',{choreId:id,title:c.title+(slot?' · '+slot:''),type:c.type,
+    by:first||'',...(rest.length?{also:rest}:{}),at:Date.now(),routine:true});
+  await reload('routineLogs','choreHistory'); resetPick(); closeSheet(); render();
+  toast(`${c.title}${slot?' · '+slot:''} done${names.length?' by '+names.join(' & '):''}`);
 };
 /* Skipping takes the occurrence off the list without claiming it happened. It
    writes a routineLog so the app stops asking, and deliberately writes NOTHING
@@ -1473,22 +1567,101 @@ window.openRoutineTick=(id,iso,i)=>{
     ${settled?`<section class="block card whodid"><h3>${settled==='skipped'?'Skipped':'Already done'}</h3>
         <p class="suggest">${settled==='skipped'
           ? `Taken off the list for this day · ${fmtDate(lg.at)}<br>No one was credited, and it counts toward no streak or prize.`
-          : `${esc(lg.by||'no one recorded')} · ${fmtDate(lg.at)}`}</p>
+          : `${esc(creditLabel(lg))} · ${fmtDate(lg.at)}`}</p>
         <div class="actions"><button class="btn" onclick="tickRoutine(${id},${q(iso)},${i})">${
           settled==='skipped'?'Put it back on the list':'Undo'}</button></div></section>`
       :`<section class="block card whodid"><h3>Who did it?</h3><div class="chiprow">
-        ${ordered.map(m=>`<button class="chip big ${owners.includes(m.name)?'on':''}" onclick="tickRoutine(${id},${q(iso)},${i},${q(m.name)})">${memberFace(m.name,false)}</button>`).join('')}
-        <button class="chip big" onclick="tickRoutine(${id},${q(iso)},${i},'Someone else')">Someone else</button>
-        <button class="chip big skip" onclick="skipRoutine(${id},${q(iso)},${i})">Skip occurrence</button>
+        ${ordered.map(m=>pickMulti
+          ? `<button class="chip big ${pickSel.has(m.name)?'on':''}" onclick="togglePickName('routine',${q(m.name)},${id},${q(iso)},${i})">${memberFace(m.name,false)}</button>`
+          : `<button class="chip big ${owners.includes(m.name)?'on':''}" onclick="tickRoutine(${id},${q(iso)},${i},${q(m.name)})">${memberFace(m.name,false)}</button>`).join('')}
+        ${pickMulti?'':`<button class="chip big" onclick="tickRoutine(${id},${q(iso)},${i},'Someone else')">Someone else</button>`}
+        <button class="chip big shift ${pickMulti?'on':''}" onclick="togglePickMulti('routine',${id},${q(iso)},${i})"
+          aria-pressed="${pickMulti}">${pickMulti?'Just one person':'⇧ More than one'}</button>
+        ${pickMulti?'':`<button class="chip big skip" onclick="skipRoutine(${id},${q(iso)},${i})">Skip occurrence</button>`}
       </div>
-      ${owners.length?`<p class="suggest">Usually ${esc(owners.join(' and '))}. Tick whoever actually did it —
-        that is who gets the credit toward streaks and prizes.</p>`:''}
-      <p class="suggest">Skipping takes this one day off the list without saying it was done —
-        no name against it, and no streak or prize progress.</p></section>`}
+      ${pickMulti?`<div class="actions"><button class="btn primary" ${pickSel.size?'':'disabled'}
+          onclick="tickRoutine(${id},${q(iso)},${i},null,true)">${
+          pickSel.size?`Done · ${esc([...pickSel].join(' & '))}`:'Pick who helped'}</button></div>
+        <p class="suggest">Everyone picked is credited. Tap a name again to take it off.</p>`
+      :(owners.length?`<p class="suggest">Usually ${esc(owners.join(' and '))}. Tick whoever actually did it —
+        that is who gets the credit toward streaks and prizes.</p>`:'')}
+      ${pickMulti?'':`<p class="suggest">Skipping takes this one day off the list without saying it was done —
+        no name against it, and no streak or prize progress.</p>`}</section>`}
     <div class="actions">
       <button class="btn" onclick="openChore(${id})">About this routine</button>
       <button class="btn ghost" onclick="closeSheet()">Close</button></div>`,{mid:true});
 };
+
+/* ---- the seven-day meal plan ----
+   Entirely derived from the routine logs, like every other view of occurrences:
+   nothing here is stored, so ticking a meal off in the chore list turns its
+   square green with no second write to keep in step (TRANSFER §4).
+
+   One square = one meal on one day, and it is green only when EVERY meal routine
+   covering that meal has been ticked. Two of three cooked is not dinner handled,
+   so a part-done square says so rather than rounding up. */
+function mealCell(meal,iso){
+  const routines=mealRoutines(meal);
+  const parts=[];
+  for(const c of routines){
+    const i=(c.slots||[]).indexOf(meal);
+    if(!routineActive(c,iso)) continue;    /* a Tue-and-Fri meal has no Wednesday */
+    parts.push({c,i,status:rStatus(c,iso,i)});
+  }
+  if(!parts.length) return {state:'none',parts};
+  const done=parts.filter(p=>p.status==='done');
+  const skipped=parts.filter(p=>p.status==='skipped');
+  /* skipped counts as settled but never as done — nobody cooked it */
+  const settled=done.length+skipped.length;
+  const state=done.length===parts.length?'done'
+    :settled===parts.length?'skipped'
+    :done.length?'part'
+    :parts.some(p=>p.status==='lapsed')?'lapsed':'open';
+  return {state,parts,done:done.length,total:parts.length};
+}
+function mealPlanDays(){
+  return Array.from({length:7},(_,n)=>isoOf(n));
+}
+function viewMealPlan(){
+  const days=mealPlanDays();
+  const any=mealNames().some(m=>mealRoutines(m).length);
+  if(!any) return `<div class="empty card"><p><strong>No meals set up yet.</strong></p>
+    <p>The plan fills itself from your routines, so nothing here needs keeping up to date separately.
+    Make a routine for the meals you cook — <b>Chores → + Add routine</b>, pick
+    <b>Three meals</b> (or <b>Breakfast &amp; dinner</b>), and turn on <b>This is a meal</b>.</p>
+    <p class="suggest">The meal switch is deliberate rather than guessed from the slot names:
+    plenty of routines happen at breakfast without being breakfast.</p></div>`;
+  const meals=mealNames();
+  /* Column count follows the household's list, and the minimum width keeps each
+     square tappable — five meals scroll sideways rather than shrink to a smear. */
+  const gridStyle=`style="grid-template-columns:104px repeat(${meals.length},minmax(96px,1fr));min-width:${104+meals.length*102}px"`;
+  const head=`<div class="mprow mphead" ${gridStyle}><span class="mpday"></span>${
+    meals.map(m=>`<span class="mpcol">${esc(m)}</span>`).join('')}</div>`;
+  const rows=days.map(iso=>{
+    const d=daysUntil(iso);
+    return `<div class="mprow" ${gridStyle}>
+      <span class="mpday"><b>${esc(fmtDate(iso+'T12:00:00'))}</b><span class="micro">${
+        d===0?'today':d===1?'tomorrow':WEEKDAYS[dowOf(iso)][1]}</span></span>
+      ${meals.map(m=>{
+        const cell=mealCell(m,iso);
+        if(cell.state==='none') return `<span class="mpcol mp-none" aria-label="${esc(m)}: nothing planned">–</span>`;
+        const label=cell.state==='done'?'done'
+          :cell.state==='skipped'?'skipped'
+          :cell.state==='part'?`${cell.done} of ${cell.total}`
+          :cell.state==='lapsed'?'missed':'to do';
+        const names=cell.parts.map(p=>p.c.title).join(', ');
+        /* tapping a square goes straight to the tick sheet for the first thing
+           still outstanding, so the plan is somewhere you act, not just read */
+        const next=cell.parts.find(p=>p.status==='open'||p.status==='late')||cell.parts[0];
+        return `<button class="mpcol mp-${cell.state}" onclick="openRoutineTick(${next.c.id},${q(iso)},${next.i})"
+          title="${esc(names)}"><b>${label}</b><span class="micro">${esc(names)}</span></button>`;
+      }).join('')}
+    </div>`;
+  }).join('');
+  return `<section class="block card mpwrap">${head}${rows}</section>
+    <p class="suggest">Green means every meal routine for that slot has been ticked.
+    A skipped meal is settled but not green — nobody cooked it, so nobody is credited.</p>`;
+}
 
 /* --- routines as rows in the ordinary chore list ---
    They used to have a page of their own, reached by a tab at the top of Chores.
@@ -1519,6 +1692,7 @@ function routineWindow(){
    one is not a gap (see choreGaps). Under a who filter an unassigned routine is
    hidden exactly like an unassigned chore: honest either way. */
 function routineMatches(c){
+  if(choreAvailFor&&!availableTo(c,choreAvailFor)) return false;
   if(choreFilterWho&&!(c.assignees||[]).includes(choreFilterWho)) return false;
   if(choreFilterType&&c.type!==choreFilterType) return false;
   if(choreFilterArea&&c.area!==choreFilterArea) return false;
@@ -1567,7 +1741,7 @@ window.toggleRoutines=()=>{showRoutines=!showRoutines;render()};
 /* A routine is something that repeats so often it should not need scheduling —
    feeding the cat, meal prep, bins on Tuesday. Any chore can become one from
    Edit; this is the shortcut. */
-window.newRoutine=()=>{choreDraft={title:'',type:null,area:null,minutes:null,routine:true,
+window.newRoutine=()=>{choreDraft={title:'',type:null,area:null,minutes:null,routine:true,meal:false,
   slots:[],rdays:[],interval:1,ranchor:todayISO(),recurrence:'none',checkIn:'',dueBy:'',
   notes:'',assignees:[],priority:false,needsHelp:false};showRoutines=true;render()};
 
@@ -1746,7 +1920,22 @@ const MENU=[
 /* Named viewMenu for continuity with MENU; the LABEL is Dashboard, because in an
    app about food "Menu" reads as a list of meals. */
 function viewMenu(){
-  return `<div class="menugrid">${MENU.map(([t,ico,label,sub])=>
+  /* One button per person, above the tiles. It answers the question people
+     actually walk up to the tablet with — "what can I do right now" — which the
+     tiles only answer for the household as a whole. Each shows the count of jobs
+     that person could pick up today: theirs plus everything unclaimed. */
+  const work=D.members.length?`<section class="block card"><h3>Looking for Work?</h3>
+    <div class="chiprow">${D.members.map(m=>{
+      const n=D.chores.filter(c=>!isRoutine(c)&&availableTo(c,m.name)
+        &&hasRealDate(c.dueBy)&&(daysUntil(c.dueBy)??99)<=0).length
+        +routineOpenNow().filter(o=>availableTo(o.c,m.name)).length;
+      return `<button class="chip big ${m.avatar?'hasface':''}" onclick="lookingForWork(${q(m.name)})">${
+        memberFace(m.name,true)}${n?`<span class="wcount">${n}</span>`:''}</button>`;
+    }).join('')}</div>
+    <p class="suggest">Tap a name for everything due today that they could pick up —
+    their own jobs plus anything nobody has claimed. Work already assigned to someone else
+    stays off the list, so two people do not start the same thing.</p></section>`:'';
+  return work+`<div class="menugrid">${MENU.map(([t,ico,label,sub])=>
     `<button class="menutile" onclick="goTab('${t}')">
        <span class="mico" aria-hidden="true">${ico}</span>
        <span class="mlabel">${label}</span>
@@ -1922,11 +2111,22 @@ function batchParse(kind,text){
       }
       r.unknown.push(t);
     }
-    /* the first unrecognised word is almost always a category / chore type that
-       doesn't exist yet — propose it rather than discarding it */
-    if(r.unknown.length) r.propose=r.unknown[0];
+    /* A single unrecognised word is almost always a category / chore type that
+       doesn't exist yet, so propose it rather than discarding it.
+
+       TWO of them used to be decided by position — whichever was typed first
+       became the new type and the rest became notes. That made "in any order"
+       false exactly where it mattered, because the two orderings produced
+       different vocabulary. Now nothing is picked for you: every unrecognised
+       word is offered in the preview and the choice is a tap. Order still
+       decides the order they are LISTED in, which is just the words as typed. */
+    if(r.unknown.length===1) r.propose=r.unknown[0];
+    else if(r.unknown.length>1) r.pick=[...r.unknown];
     /* food has nowhere to keep loose words; chores have a notes field, so use it */
-    if(kind==='chores'&&r.unknown.length>1) r.notes=r.unknown.slice(1).join(', ');
+    if(kind==='chores'){
+      const spare=r.propose?r.unknown.slice(1):r.unknown;
+      if(spare.length) r.notes=spare.join(', ');
+    }
     return r;
   });
 }
@@ -1949,6 +2149,15 @@ window.batchPreview=()=>{
 };
 window.batchBack=()=>{batch.parsed=null;render()};
 window.batchToggleVocab=()=>{batch.makeVocab=!batch.makeVocab;render()};
+/* Which of a line's unrecognised words becomes a new type. Tapping the current
+   pick clears it, putting every word back into notes. */
+window.batchPickType=(i,w)=>{
+  const r=batch.parsed[i]; if(!r||!r.pick) return;
+  r.propose=(r.propose===w)?null:w;
+  const spare=r.pick.filter(x=>x!==r.propose);
+  r.notes=spare.length?spare.join(', '):'';
+  render();
+};
 
 function batchNewVocab(){
   if(!batch.parsed) return [];
@@ -2021,10 +2230,12 @@ function viewBatch(){
         ? 'Places (fridge, freezer, pantry, counter, cabinet, basement, crisper, door) · your categories · containers · "5 days", "2 weeks", or a date like 2026-08-20.'
         : '"every two weeks", "weekly", "fortnightly", "every 3 days" · household names · your chore types · parts of the house · "20 min" or "2 hours" · "3 days" or 2026-08-20 for a due date · the word "priority".'}</p>
       <p class="suggest">Anything else is treated as a ${food?'category':'chore type'} you have not made yet,
-      and you will be asked before it is created. Nothing is written until you confirm.</p></section>`;
+      and you will be asked before it is created. If a line has more than one word it does not recognise,
+      it will not guess which one — you pick, or leave them all as notes.
+      Nothing is written until you confirm.</p></section>`;
   }
   const fresh=batchNewVocab();
-  const rows=batch.parsed.map(r=>{
+  const rows=batch.parsed.map((r,idx)=>{
     const bits=food
       ? [r.category,r.location,r.container,r.eatBy?'eat by '+r.eatBy:null]
       : [r.type,r.area,r.minutes?minsLabel(r.minutes):null,
@@ -2032,10 +2243,15 @@ function viewBatch(){
          r.dueBy?'due '+r.dueBy:null,(r.assignees||[]).join(' & ')||null,r.priority?'priority':null];
     const known=bits.filter(Boolean).map(b=>`<span class="chip sm">${esc(b)}</span>`).join('');
     const prop=r.propose?`<span class="chip sm new">${esc(r.propose)} — new ${food?'category':'type'}</span>`:'';
+    /* More than one word went unrecognised, so the app does not guess which is
+       the new type — it asks. Until one is tapped they are all just notes. */
+    const pick=(r.pick&&!r.propose)?`<span class="chip sm gap">which is the new ${food?'category':'type'}?</span>`
+      +r.pick.map(w=>`<button class="chip sm pickable" onclick="batchPickType(${idx},${q(w)})">${esc(w)}</button>`).join('')
+      :(r.pick?`<button class="chip sm pickable" onclick="batchPickType(${idx},${q(r.propose)})">undo — all notes</button>`:'');
     const gaps=batchGaps(kind,{...r,...(r.propose&&batch.makeVocab?{[food?'category':'type']:r.propose}:{})});
     const miss=gaps.length?`<span class="chip sm gap">no ${gaps.join(', no ')}</span>`:'';
     const note=r.notes?`<span class="chip sm">note: ${esc(r.notes)}</span>`:'';
-    return `<div class="brow"><b>${esc(r.name)}</b><div class="bchips">${known}${prop}${note}${miss}</div></div>`;
+    return `<div class="brow"><b>${esc(r.name)}</b><div class="bchips">${known}${prop}${pick}${note}${miss}</div></div>`;
   }).join('');
   const vocab=fresh.length?`<section class="block card"><h3>${fresh.length} new ${food?'category':'chore type'}${fresh.length===1?'':'s'}</h3>
       <p class="suggest">These are not in your list yet: <b>${fresh.map(esc).join(', ')}</b>.</p>
@@ -2096,6 +2312,8 @@ function viewChores(){
       `<button class="chip ${choreFilterArea===a?'on':''}" onclick="filterArea(${q(a)})">${esc(a)}</button>`).join(''))
    +row("What kind of job?", types.map(t=>
       `<button class="chip ${choreFilterType===t?'on':''}" onclick="filterType(${q(t)})">${esc(t)}</button>`).join(''))
+   +(choreAvailFor?row("Showing work anyone could pick up",
+      `<button class="chip on" onclick="clearAvailFor()">${esc(choreAvailFor)} — and unclaimed jobs · tap to drop</button>`):'')
    +row("", (nGap?`<button class="chip ${choreGapsOnly?'on':''}" onclick="toggleChoreGaps()">Needs details · ${nGap}</button>`:'')
      +(anyChoreFilter()?`<button class="chip" onclick="clearFilters()">Clear all filters</button>`:''));
 
@@ -2103,6 +2321,7 @@ function viewChores(){
      and their chore list. The summary line has to name the ACTIVE filters, or a
      closed accordion silently hides why the list looks short. */
   const active=[
+    choreAvailFor&&`work for ${choreAvailFor}`,
     choreFilterTime&&TIMEBUCKETS.find(([k])=>k===choreFilterTime)[1],
     choreFilterPri&&'priority',
     choreFilterDue&&({overdue:'overdue',today:'due today',week:'next 7 days',none:'no due date',someday:'someday'})[choreFilterDue],
@@ -2112,7 +2331,7 @@ function viewChores(){
   const summary=active.length?active.join(' · '):'everything';
   const filters=`<div class="bulk ${filtersOpen?'open':''}">
     <button class="bulkhead" onclick="toggleFilters()" aria-expanded="${filtersOpen}">
-      What to do? <span class="headnote">${esc(summary)}</span>
+      Looking for Work? <span class="headnote">${esc(summary)}</span>
       <span class="caret">${filtersOpen?'▴':'▾'}</span></button>
     ${filtersOpen?`<div class="bulkbody">${inner}</div>`:''}</div>`;
 
@@ -2164,9 +2383,15 @@ function viewChores(){
   return sub+filters+bulkBar(list)+bulkNote+hiddenNote+body+rnote;
 }
 const anyChoreFilter=()=>!!(choreFilterType||choreFilterWho||choreFilterTime||choreFilterArea||choreFilterDue||choreFilterPri||choreGapsOnly);
+/* "Looking for work?" is a LOOSER question than "whose is it?". It means work
+   this person could pick up right now: theirs, plus everything nobody has
+   claimed. It deliberately does NOT include a job assigned to someone else —
+   offering Ada a chore that is Kit's is how two people do the same thing. */
+const availableTo=(c,name)=>{const a=c.assignees||[]; return a.length===0||a.includes(name)};
 function choreMatches(c){
   /* The whole point of a routine is that it is NOT on the task list. */
   if(isRoutine(c)) return false;
+  if(choreAvailFor&&!availableTo(c,choreAvailFor)) return false;
   if(choreFilterType&&c.type!==choreFilterType) return false;
   if(choreFilterWho&&!(c.assignees||[]).includes(choreFilterWho)) return false;
   if(choreFilterArea&&c.area!==choreFilterArea) return false;
@@ -2193,7 +2418,25 @@ window.filterTime=t=>{choreFilterTime=choreFilterTime===t?null:t;render()};
 window.filterDue=d=>{choreFilterDue=choreFilterDue===d?null:d;render()};
 window.filterPri=()=>{choreFilterPri=!choreFilterPri;render()};
 window.clearFilters=()=>{choreFilterType=choreFilterWho=choreFilterArea=choreFilterTime=choreFilterDue=null;
-  choreFilterPri=false;choreGapsOnly=false;render()};
+  choreAvailFor=null;choreFilterPri=false;choreGapsOnly=false;render()};
+/* From the dashboard: what could this person start on today. Overdue counts as
+   due — a job that needed doing yesterday still needs doing now — so this is
+   "due by the end of today", not "dated today". */
+window.lookingForWork=name=>{
+  clearFilters();
+  choreAvailFor=name; choreFilterDue='today'; showRoutines=true;
+  tab='chores'; draft=null; choreDraft=null; batch=null; filtersOpen=false;
+  render();
+};
+window.clearAvailFor=()=>{choreAvailFor=null;render()};
+window.togglePickMulti=(kind,a,b,c)=>{
+  pickMulti=!pickMulti; pickSel=new Set();
+  kind==='routine'?openRoutineTick(a,b,c):openChore(a);
+};
+window.togglePickName=(kind,name,a,b,c)=>{
+  pickSel.has(name)?pickSel.delete(name):pickSel.add(name);
+  kind==='routine'?openRoutineTick(a,b,c):openChore(a);
+};
 window.toggleChoreGaps=()=>{choreGapsOnly=!choreGapsOnly;render()};
 
 window.newChore=()=>{choreDraft={title:'',type:null,area:null,minutes:null,recurrence:'none',interval:7,checkIn:'',dueBy:todayISO(),notes:'',assignees:[],priority:false,needsHelp:false};render()};
@@ -2228,9 +2471,16 @@ function viewChoreForm(){
           :+c.interval>1?`Every ${c.interval} days, counting from ${esc(fmtDate((c.ranchor||todayISO())+'T12:00:00'))}.`
           :'Every day.'}</p></div>
       <div><div class="micro" style="margin-bottom:8px">How many times a day?</div>
-        <div class="chiprow">${SLOT_PRESETS.map((s,i)=>
+        <div class="chiprow">${slotPresets().map((s,i)=>
           `<button class="chip ${JSON.stringify(c.slots||[])===JSON.stringify(s.slots)?'on':''}" onclick="cdSlots(${i})">${s.label}</button>`).join('')}</div>
         ${(c.slots||[]).length?`<p class="suggest">${esc(c.slots.join(' · '))} — each is ticked separately.</p>`:''}</div>
+      ${(c.slots||[]).some(sl=>mealNames().includes(sl))?`
+      <div><div class="micro" style="margin-bottom:8px">Is this a meal?</div>
+        <div class="chiprow">
+          <button class="chip ${c.meal?'on':''}" onclick="cdSet('meal',!choreDraft.meal)">This is a meal</button></div>
+        <p class="suggest">Meals show on the seven-day plan under Food, and the square turns green
+        once this is ticked. It is a switch rather than a guess from the slot name — plenty of
+        routines happen at breakfast without being breakfast.</p></div>`:''}
       `:`
       <div><div class="micro" style="margin-bottom:8px">Repeats</div><div class="chiprow">${RECURRENCES.map(([k,l])=>
         `<button class="chip ${c.recurrence===k?'on':''}" onclick="cdSet('recurrence','${k}')">${l}</button>`).join('')}
@@ -2275,7 +2525,7 @@ window.cdPreset=i=>{const p=ROUTINE_PRESETS[i],c=choreDraft;
   c.ranchor=c.ranchor||todayISO(); render()};
 window.cdDay=n=>{const c=choreDraft; c.rdays=[...(c.rdays||[])];
   const i=c.rdays.indexOf(n); i<0?c.rdays.push(n):c.rdays.splice(i,1); c.rdays.sort(); render()};
-window.cdSlots=i=>{choreDraft.slots=[...SLOT_PRESETS[i].slots];render()};
+window.cdSlots=i=>{choreDraft.slots=[...slotPresets()[i].slots];render()};
 window.cdSet=(k,v)=>{choreDraft[k]=(choreDraft[k]===v&&(k==='type'||k==='area'))?null:v;
   if(k==='minutes'&&!(v>0)) choreDraft.minutes=null; render()};
 window.cdWho=n=>{const a=choreDraft.assignees; const i=a.indexOf(n); i<0?a.push(n):a.splice(i,1); render()};
@@ -2305,14 +2555,21 @@ window.openChore=id=>{
       <p class="suggest">Routines are ticked per day from the chore list, so their history stays
       per-occurrence rather than collapsing into one "last done".</p></section>`
       :`<section class="block card"><h3>Mark done by</h3>
-      <div class="chiprow">${D.members.length?D.members.map(m=>
-        `<button class="chip big" onclick="completeChore(${id},${q(m.name)})">${memberFace(m.name,false)}</button>`).join('')
+      <div class="chiprow">${D.members.length?D.members.map(m=>pickMulti
+        ? `<button class="chip big ${pickSel.has(m.name)?'on':''}" onclick="togglePickName('chore',${q(m.name)},${id})">${memberFace(m.name,false)}</button>`
+        : `<button class="chip big" onclick="completeChore(${id},${q(m.name)})">${memberFace(m.name,false)}</button>`).join('')
         :`<button class="chip big" onclick="completeChore(${id},'')">Done</button>
           <span style="color:var(--muted);align-self:center">Add names in Setup to track who.</span>`}
-        ${D.members.length?`<button class="chip big" onclick="completeChore(${id},'Someone else')">Someone else</button>`:''}
-      </div></section>`}
+        ${D.members.length&&!pickMulti?`<button class="chip big" onclick="completeChore(${id},'Someone else')">Someone else</button>`:''}
+        ${D.members.length>1?`<button class="chip big shift ${pickMulti?'on':''}" onclick="togglePickMulti('chore',${id})"
+          aria-pressed="${pickMulti}">${pickMulti?'Just one person':'⇧ More than one'}</button>`:''}
+      </div>
+      ${pickMulti?`<div class="actions"><button class="btn primary" ${pickSel.size?'':'disabled'}
+          onclick="completeChore(${id},null,true)">${
+          pickSel.size?`Done · ${esc([...pickSel].join(' & '))}`:'Pick who helped'}</button></div>
+        <p class="suggest">Everyone picked is credited. Tap a name again to take it off.</p>`:''}</section>`}
     ${hist.length?`<div class="guide"><span class="micro">Recent</span>${hist.map(h=>
-      `<p style="margin-top:6px">${esc(h.by||'someone')} · ${fmtDate(h.at)}</p>`).join('')}</div>`:''}
+      `<p style="margin-top:6px">${esc(creditLabel(h))} · ${fmtDate(h.at)}</p>`).join('')}</div>`:''}
     <div class="actions">
       ${isRoutine(c)
         /* Reschedule is meaningless for a rhythm. The only thing worth offering
@@ -2365,12 +2622,20 @@ window.setDue=async(id,v)=>{
   toast(`${c.title} — ${dueLabel(c)}`);
 };
 window.toggleFlag=async(id,k)=>{const c=D.chores.find(x=>x.id===id);c[k]=!c[k];await put('chores',c);openChore(id);render()};
-window.completeChore=async(id,who)=>{
+window.completeChore=async(id,who,fromMulti)=>{
   const c=D.chores.find(x=>x.id===id); if(!c)return;
   /* Routines are ticked per occurrence; completing one wholesale would delete a
      rhythm the household still needs. */
   if(isRoutine(c)) return openRoutineTick(id,todayISO(),0);
-  await put('choreHistory',{choreId:id,title:c.title,type:c.type,by:who,at:Date.now()});
+  const names=fromMulti?[...pickSel]:(who?[who]:[]);
+  if(fromMulti&&!names.length) return;
+  const [first,...rest]=names;
+  /* One history row, not one per helper: two rows would read as the job having
+     been done twice. `also` keeps every name, and creditLabel() reads them. */
+  await put('choreHistory',{choreId:id,title:c.title,type:c.type,
+    by:first||(who??''),...(rest.length?{also:rest}:{}),at:Date.now()});
+  resetPick();
+  who=names.length?names.join(' & '):who;
   if(c.recurrence==='none'){
     await del('chores',id);
     toast(`${c.title} done${who?' by '+who:''}`);
@@ -2910,10 +3175,103 @@ window.deletePrize=async id=>{
   await del('prizes',id); await reload('prizes'); toast('Prize deleted'); render();
 };
 
+
+/* ---- Setup -> Meals ---- */
+const MEAL_PRESETS=[
+  {n:2,names:['Breakfast','Dinner']},
+  {n:3,names:['Breakfast','Lunch','Dinner']},
+  {n:4,names:['Breakfast','Lunch','Dinner','Supper']},
+  {n:5,names:['Breakfast','Morning snack','Lunch','Afternoon snack','Dinner']},
+];
+/* Meal routines whose slots no longer match any meal on the list. Renaming a
+   meal does NOT rewrite the routines that referenced it — rewriting slots would
+   shift the index every tick is keyed by (`rkey`) and mis-attribute months of
+   history. So the rename is left alone and the mismatch is reported instead. */
+function orphanMealRoutines(){
+  const live=new Set(mealNames());
+  return D.chores.filter(c=>isMealRoutine(c)&&!(c.slots||[]).some(sl=>live.has(sl)));
+}
+function paneMeals(){
+  const meals=mealNames();
+  const custom=(D.meals||[]).length>0;
+  const orphans=orphanMealRoutines();
+  return `<section class="block card"><h3>Meals a day</h3>
+    <p class="suggest" style="margin:0 0 10px">The meal plan under Food gets one column per meal.
+    Pick a number to start from, then rename any of them — not every house calls the evening one dinner.</p>
+    <div class="chiprow">${MEAL_PRESETS.map(pr=>
+      `<button class="chip ${meals.length===pr.n&&meals.join('|')===pr.names.join('|')?'on':''}"
+        onclick="mealPreset(${pr.n})">${pr.n} · ${esc(pr.names.join(', '))}</button>`).join('')}</div>
+    ${custom?'':`<p class="suggest">Nothing set yet, so the plan is using the usual three.</p>`}
+  </section>
+  <section class="block card"><h3>${meals.length} meal${meals.length===1?'':'s'}</h3>
+    ${meals.map((m,i)=>`<div class="kv">
+      <input class="field" style="max-width:260px" value="${esc(m)}"
+        onchange="mealRename(${i},this.value)" aria-label="Meal ${i+1}">
+      <button class="btn ghost" onclick="mealRemove(${i})" ${meals.length<2?'disabled':''}>Remove</button>
+    </div>`).join('')}
+    <div class="actions">
+      <button class="btn" onclick="mealAdd()" ${meals.length>=CAP.meals?'disabled':''}>+ Add a meal</button>
+      ${custom?`<button class="btn ghost" onclick="mealReset()">Back to the usual three</button>`:''}
+    </div>
+    <p class="suggest">Up to ${CAP.meals}. Order here is the order of the columns.</p>
+  </section>
+  ${orphans.length?`<section class="block card"><h3>${orphans.length} meal routine${orphans.length===1?'':'s'} off the plan</h3>
+    <p class="suggest">These are marked as meals but their slots do not match any meal on the list,
+    so they have no column to sit in: <b>${orphans.map(c=>esc(c.title)+' · '+esc((c.slots||[]).join(', '))).join('; ')}</b>.
+    Renaming a meal deliberately does not rewrite them — the ticks already recorded are keyed to the old slots,
+    and rewriting would move months of history onto the wrong meal. Open each one and set its slots by hand.</p>
+  </section>`:''}
+  <section class="block card"><h3>One device</h3>
+    <p class="suggest">The meal list is stored on this tablet only — it is not among the lists that sync yet.
+    Which routine covers which meal <i>does</i> sync, on the routine itself, so a second tablet shows the right
+    plan as soon as its own meal list matches this one.</p></section>`;
+}
+window.mealPreset=async n=>{
+  const pr=MEAL_PRESETS.find(x=>x.n===n); if(!pr)return;
+  for(const row of (D.meals||[])) await del('meals',row.id);
+  for(let i=0;i<pr.names.length;i++) await put('meals',{name:pr.names[i],pos:i});
+  await reload('meals'); render(); toast(`${pr.n} meals a day`);
+};
+/* Renaming writes the whole list back so `pos` stays contiguous — a gap would
+   sort fine today and surprise whoever adds the next meal. */
+async function mealWrite(names){
+  for(const row of (D.meals||[])) await del('meals',row.id);
+  for(let i=0;i<names.length;i++) await put('meals',{name:names[i],pos:i});
+  await reload('meals'); render();
+}
+window.mealRename=async(i,v)=>{
+  const names=mealNames().slice(); const name=String(v||'').trim();
+  if(!name) return toast('A meal needs a name');
+  if(names.some((n,j)=>j!==i&&n.toLowerCase()===name.toLowerCase())) return toast('There is already a meal called that');
+  const was=names[i]; names[i]=name; await mealWrite(names);
+  toast(`${was} is now ${name}`);
+};
+window.mealAdd=async()=>{
+  const names=mealNames().slice();
+  if(names.length>=CAP.meals) return toast(`${CAP.meals} meals is the limit`);
+  let n=1, name='New meal';
+  while(names.some(x=>x.toLowerCase()===name.toLowerCase())) name=`New meal ${++n}`;
+  await mealWrite([...names,name]);
+};
+window.mealRemove=async i=>{
+  const names=mealNames().slice();
+  if(names.length<2) return toast('Keep at least one meal');
+  const gone=names[i];
+  const using=D.chores.filter(c=>isMealRoutine(c)&&(c.slots||[]).includes(gone)).length;
+  if(!await confirmBox(`Remove <b>${esc(gone)}</b> from the plan?`
+    +(using?` ${using} meal routine${using===1?'':'s'} still use${using===1?'s':''} that slot — they keep their ticks and their history, they just lose their column until you give them a different slot.`
+           :' Nothing is using it.'),'Remove','Keep')) return;
+  names.splice(i,1); await mealWrite(names); toast(`${gone} removed`);
+};
+window.mealReset=async()=>{
+  for(const row of (D.meals||[])) await del('meals',row.id);
+  await reload('meals'); render(); toast('Back to the usual three');
+};
+
 /* ===================== SETTINGS ===================== */
-const PANES=[['members','Names'],['prizes','Prizes'],['cats','Categories'],['ctypes','Chore types'],['habits','Habits'],['stores','Stores'],['places','Places'],['areas','Rooms'],['library','Food library'],['data','Backup'],['tidy','Duplicates'],['sync','Sync'],['storage','Storage']];
+const PANES=[['members','Names'],['prizes','Prizes'],['cats','Categories'],['ctypes','Chore types'],['habits','Habits'],['meals','Meals'],['stores','Stores'],['places','Places'],['areas','Rooms'],['library','Food library'],['data','Backup'],['tidy','Duplicates'],['sync','Sync'],['storage','Storage']];
 const PANEGROUPS=[
-  ['Your household lists',['members','prizes','cats','ctypes','habits','stores','places','areas']],
+  ['Your household lists',['members','prizes','cats','ctypes','habits','meals','stores','places','areas']],
   ['Food library',        ['library']],
   ['Data and cleanup',    ['data','tidy','storage']],
   ['This device',         ['sync']],
@@ -2930,6 +3288,7 @@ function viewSettings(){
     : settingsPane==='cats'?paneList('categories','Food categories',CAP.cats,'Deleting a category in use asks where its items should move — items are never deleted.')
     : settingsPane==='ctypes'?paneList('choreTypes','Chore types',CAP.choreTypes,'Deleting a type in use asks where its chores should move.')
     : settingsPane==='habits'?paneList('habits','Habits',CAP.habits,'Deleting a habit keeps its past logs for the record.')
+    : settingsPane==='meals'?paneMeals()
     : settingsPane==='prizes'?paneprizes()
     : settingsPane==='stores'?paneList('stores','Shops',CAP.stores,'Shopping items group by shop. Deleting a shop in use asks where its items should move.')
     : settingsPane==='places'?paneLocations()
@@ -3262,9 +3621,9 @@ const TABLES={
         tags:(r.tags||'').split('|').map(s=>s.trim()).filter(Boolean).slice(0,8),
         body:r.body||'',created:t,modified:Date.parse(r.modified)||t};
     }},
-  chores:{store:'chores',cols:['title','type','area','minutes','routine','routine_days','routine_slots','recurrence','interval_days','check_in','due_by','assignees','priority','needs_help','notes'],
-    ex:['Feed the cat','Pet Care','Kitchen','5','yes','','Breakfast|Dinner','','','','','','no','no','Half a tin each time'],
-    out:c=>[c.title,c.type,c.area,c.minutes,c.routine?'yes':'no',(c.rdays||[]).join('|'),(c.slots||[]).join('|'),
+  chores:{store:'chores',cols:['title','type','area','minutes','routine','is_meal','routine_days','routine_slots','recurrence','interval_days','check_in','due_by','assignees','priority','needs_help','notes'],
+    ex:['Feed the cat','Pet Care','Kitchen','5','yes','no','','Breakfast|Dinner','','','','','','no','no','Half a tin each time'],
+    out:c=>[c.title,c.type,c.area,c.minutes,c.routine?'yes':'no',c.meal?'yes':'no',(c.rdays||[]).join('|'),(c.slots||[]).join('|'),
       c.recurrence,c.interval,c.checkIn,c.dueBy,(c.assignees||[]).join('|'),
       c.priority?'yes':'no',c.needsHelp?'yes':'no',c.notes],
     inn:(r,errs,warns)=>{
@@ -3284,8 +3643,13 @@ const TABLES={
       const rdays=String(r.routine_days||'').split('|').map(s=>+s.trim())
         .filter(n=>Number.isInteger(n)&&n>=0&&n<=6);
       const slots=String(r.routine_slots||'').split('|').map(s=>s.trim()).filter(Boolean).slice(0,6);
+      const meal=routine&&/^(y|yes|true|1)$/i.test(String(r.is_meal||'').trim());
+      /* A meal flag on something with no meal slot would put a row on the plan
+         that no column can hold, so say so rather than importing a dead flag. */
+      if(meal&&!slots.some(sl=>mealNames().includes(sl)))
+        warns.push(`is_meal is set but no slot is one of ${mealNames().join('/')} — imported without the meal flag`);
       return {title:r.title.trim(),type:r.type||null,area:area?area.name:null,minutes:mins,
-        routine,rdays,slots,ranchor:routine?todayISO():undefined,
+        routine,meal:meal&&slots.some(sl=>mealNames().includes(sl)),rdays,slots,ranchor:routine?todayISO():undefined,
         recurrence:R.recurrence,interval:R.interval,
         checkIn:r.check_in||'',dueBy:r.due_by||'',assignees:(r.assignees||'').split('|').filter(Boolean),
         priority:/^(yes|true|1)$/i.test(r.priority||''),needsHelp:/^(yes|true|1)$/i.test(r.needs_help||''),
@@ -3838,7 +4202,7 @@ function showSheet(html,opts){
   scrim.addEventListener('click',e=>{if(e.target===scrim)closeSheet()});
   document.body.appendChild(scrim);
 }
-window.closeSheet=()=>{const s=$('#scrim');if(s)s.remove()};
+window.closeSheet=()=>{const s=$('#scrim');if(s)s.remove();resetPick()};
 function confirmBox(msgHtml,yes,no){
   if(!HAS_DIALOG){  /* pre-2014 browsers: plain confirm keeps the app usable */
     const plain=String(msgHtml).replace(/<[^>]*>/g,'');
